@@ -65,7 +65,7 @@ def main():
     parser.add_argument('-c', '--camera-input', type=str, 
         default=os.path.join(data_dir, 'camera.npy'))
     parser.add_argument('-t', '--template-mesh', type=str, 
-        default=os.path.join(data_dir, 'obj/sphere/sphere_642.obj'))
+        default=os.path.join(data_dir, 'obj/sphere/sphere_642_s.obj'))
     parser.add_argument('-o', '--output-dir', type=str, 
         default=os.path.join(data_dir, 'results/output_deform'))
     parser.add_argument('-b', '--batch-size', type=int,
@@ -83,15 +83,16 @@ def main():
     cameras = np.load(args.camera_input).astype('float32')
     optimizer = torch.optim.Adam(model.parameters(), 0.01, betas=(0.5, 0.99))
 
-    camera_distances = torch.from_numpy(cameras[:, 0])
+    camera_distances = torch.from_numpy(cameras[:, 0]) 
     elevations = torch.from_numpy(cameras[:, 1])
     viewpoints = torch.from_numpy(cameras[:, 2])
     renderer.transform.set_eyes_from_angles(camera_distances, elevations, viewpoints)
 
     loop = tqdm.tqdm(list(range(0, 2000)))
     writer = imageio.get_writer(os.path.join(args.output_dir, 'deform.gif'), mode='I')
+    images_gt = torch.from_numpy(images).cuda()
     for i in loop:
-        images_gt = torch.from_numpy(images).cuda()
+        
 
         mesh, laplacian_loss, flatten_loss = model(args.batch_size)
         images_pred = renderer.render_mesh(mesh)
@@ -108,7 +109,7 @@ def main():
         loss.backward()
         optimizer.step()
 
-        if i % 100 == 0:
+        if i % 1 == 0:
             image = images_pred.detach().cpu().numpy()[0].transpose((1, 2, 0))
             writer.append_data((255*image).astype(np.uint8))
             imageio.imsave(os.path.join(args.output_dir, 'deform_%05d.png'%i), (255*image[..., -1]).astype(np.uint8))

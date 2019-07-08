@@ -16,7 +16,7 @@ current_dir = os.path.dirname(os.path.realpath(__file__))
 
 
 class PoseReader():
-    def __init__(self, fyuse_dir, scale_from_full_hd=0.5):
+    def __init__(self, fyuse_dir, scale_from_full_hd=1.0):
         scenemodel_path = os.path.join(fyuse_dir, "scenemodel_raw_refined.json")
         assert os.path.exists(scenemodel_path), "Scenemodel {} not found!".format(scenemodel_path)
         with open(scenemodel_path, 'r') as f:
@@ -35,16 +35,19 @@ class PoseReader():
             transforms['distortion'] = torch.Tensor(pose['anchor']['distortion'])
             # Distortion is [k1, k2, p1, p2] reference:
             # https://docs.opencv.org/2.4/modules/calib3d/doc/camera_calibration_and_3d_reconstruction.html
-            intrinsics = torch.Tensor(pose['anchor']['intrinsicsVector']) * scale_from_full_hd
-            # Account for the half pixel offset:
+            intrinsics = torch.Tensor(pose['anchor']['intrinsicsVector'])
+
             K = [
-                [intrinsics[0], intrinsics[2], intrinsics[3] - 0.5], [0, intrinsics[1], intrinsics[4] - 0.5], [0, 0, 1]
+                [intrinsics[0]*0.134, 0., intrinsics[3]*0.134], [0, intrinsics[1]*0.134, intrinsics[4]*0.134 + 56], [0, 0, 1]
             ]
 
-            # K would be [fx skew cx; 0 fy cy; 0 0 1]
             # intrinsicsVector contains [fx,fy,skew,cx,cy]
             transforms['K'] = torch.Tensor(K)
             transforms['Rt'] = torch.Tensor(pose['anchor']['transform']).reshape(4, 4)
+            tempR = torch.mm(transforms['Rt'][0:3,0:3],torch.tensor([[1.,0,0],[0,-1.,0],[0,0,-1.]])).transpose(0,1)
+            transforms['Rt'][0:3,0:3] = tempR.clone()
+            transforms['Rt'][0:3,3] = -1.0*torch.mv(tempR,transforms['Rt'][0:3,3])
+
             self.poses[frame_num] = transforms
 
     def __getitem__(self, idx):
@@ -54,6 +57,7 @@ class PoseReader():
 
     def __len__(self):
         return len(self.poses)
+
 
 
 
@@ -86,20 +90,22 @@ class Model(nn.Module):
         laplacian_loss = self.laplacian_loss(vertices).mean()
         flatten_loss = self.flatten_loss(vertices).mean()
 
-        return sr.Mesh(vertices.repeat(batch_size, 1, 1), self.faces.repeat(batch_size, 1, 1)), laplacian_loss, flatten_loss
+        return sr.Mesh(vertices.repeat(batch_size, 1, 1), 
+                       self.faces.repeat(batch_size, 1, 1)), laplacian_loss, flatten_loss
 
 
-def SilhouetteLoss(predict, target):
+def neg_iou_loss(predict, target):
     dims = tuple(range(predict.ndimension())[1:])
-    intersect = (predict * target).sum(dims) + 1e-6
+    intersect = (predict * target).sum(dims)
     union = (predict + target - predict * target).sum(dims) + 1e-6
     return 1. - (intersect / union).sum() / intersect.nelement()
+
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-i', '--data-dir', type=str, default='/home/mridul/Code/FyuseMesh/uxgpbaxotx/uxgpbaxotx/')
-    parser.add_argument('-t', '--template-mesh', type=str, default=os.path.join(current_dir, '../data/obj/sphere/sphere_642.obj'))
+    parser.add_argument('-t', '--template-mesh', type=str, default=os.path.join(current_dir, '../data/obj/sphere/sphere_642_s.obj'))
     parser.add_argument('-o', '--output-dir', type=str, default=os.path.join(current_dir, '../data/results/output_deform'))
     parser.add_argument('-b', '--batch-size', type=int, default=120)
     args = parser.parse_args()
@@ -107,7 +113,7 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     model = Model(args.template_mesh).cuda()
-    optimizer = torch.optim.Adam(model.parameters(), 0.01, betas=(0.5, 0.99))
+    
 
 
     #Read in data ./ 
@@ -122,7 +128,6 @@ def main():
         # print (poseData.poses.keys())
         idx = list(poseData.poses)[ii]
         projMat = torch.mm(poseData.poses[idx]['K'],poseData.poses[idx]['Rt'][0:3,:])
-        # print (projMat.shape)
         imgGt = imageio.imread(args.data_dir+'Gt/{0:09d}'.format(idx)+'.jpg').astype('float32') / 255.0
         # swap axes ??
         imagesGT.append(imgGt)
@@ -130,9 +135,12 @@ def main():
 
 
     projMatrices = torch.stack(projMatrices)
+    #print(projMatrices)
     projMatrices = projMatrices.cuda()
     
-    renderer = sr.SoftRenderer(image_size=256, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projMatrices)#, viewing_angle=12.5)
+    renderer = sr.SoftRenderer(image_size=256, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projMatrices, camera_direction=[0,0,+1], orig_size=256.0)
+    optimizer = torch.optim.Adam(model.parameters(), 0.01, betas=(0.5, 0.99))
+
 
     loop = tqdm.tqdm(list(range(0, 2000)))
     writer = imageio.get_writer(os.path.join(args.output_dir, 'deform.gif'), mode='I')
@@ -147,7 +155,9 @@ def main():
         # optimize mesh with silhouette reprojection error and 
         # geometry constraints
         #print (SilhouetteLoss(images_pred[:,3], images_gt), laplacian_loss, flatten_loss)
-        loss = SilhouetteLoss(images_pred[:,3], images_gt) + 0.03 * laplacian_loss + 0.0003 * flatten_loss
+        loss = neg_iou_loss(images_pred[:, 3], images_gt) + \
+               0.03 * laplacian_loss + \
+               0.0003 * flatten_loss
 
         loop.set_description('Loss: %.4f'%(loss.item()))
 
@@ -155,12 +165,13 @@ def main():
         loss.backward()
         optimizer.step()
 
-        if i % 10 == 0:
+        if i % 100 == 0:
             image = images_pred.detach().cpu().numpy()[0].transpose((1, 2, 0))
             writer.append_data((255*image).astype(np.uint8))
             imageio.imsave(os.path.join(args.output_dir, 'deform_%05d.png'%i), (255*image[..., -1]).astype(np.uint8))
             # save optimized mesh
-            model(1)[0].save_obj(os.path.join(args.output_dir, 'plane.obj'), save_texture=False)
+    
+    model(1)[0].save_obj(os.path.join(args.output_dir, 'car.obj'), save_texture=False)
 
 
 if __name__ == '__main__':
