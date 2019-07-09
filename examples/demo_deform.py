@@ -88,7 +88,7 @@ def main():
     viewpoints = torch.from_numpy(cameras[:, 2])
     renderer.transform.set_eyes_from_angles(camera_distances, elevations, viewpoints)
 
-    loop = tqdm.tqdm(list(range(0, 2000)))
+    loop = tqdm.tqdm(list(range(0, 200)))
     writer = imageio.get_writer(os.path.join(args.output_dir, 'deform.gif'), mode='I')
     images_gt = torch.from_numpy(images).cuda()
     for i in loop:
@@ -109,9 +109,9 @@ def main():
         loss.backward()
         optimizer.step()
 
-        if i % 1 == 0:
+        if i % 100 == 0:
             image = images_pred.detach().cpu().numpy()[0].transpose((1, 2, 0))
-            writer.append_data((255*image).astype(np.uint8))
+            writer.append_data((255*image[...,-1]).astype(np.uint8))
             imageio.imsave(os.path.join(args.output_dir, 'deform_%05d.png'%i), (255*image[..., -1]).astype(np.uint8))
 
     # save optimized mesh

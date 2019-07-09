@@ -22,7 +22,7 @@ class PoseReader():
         with open(scenemodel_path, 'r') as f:
             poses = json.load(f)
         # crops_path = os.path.join(root_dir, fyuse_id, "Crops")
-        jpg_ids = set([int(x.split("/")[-1].split(".")[0]) for x in glob.glob(fyuse_dir + "Crops/*.jpg")])
+        jpg_ids = set([int(x.split("/")[-1].split(".")[0]) for x in glob.glob(fyuse_dir + "GtRed/*.jpg")])
         # Make a data structure that has a dictionary with distortion matrix, intrinsics and [R|t] that is looked
         # up by frame id
         self.poses = {}
@@ -46,7 +46,7 @@ class PoseReader():
             transforms['Rt'] = torch.Tensor(pose['anchor']['transform']).reshape(4, 4)
             tempR = torch.mm(transforms['Rt'][0:3,0:3],torch.tensor([[1.,0,0],[0,-1.,0],[0,0,-1.]])).transpose(0,1)
             transforms['Rt'][0:3,0:3] = tempR.clone()
-            transforms['Rt'][0:3,3] = -1.0*torch.mv(tempR,transforms['Rt'][0:3,3])
+            transforms['Rt'][0:3,3] = 1.0*torch.mv(tempR,transforms['Rt'][0:3,3])
 
             self.poses[frame_num] = transforms
 
@@ -70,7 +70,7 @@ class Model(nn.Module):
         self.register_buffer('vertices', self.template_mesh.vertices * 0.5)
         self.register_buffer('faces', self.template_mesh.faces)
         self.register_buffer('textures', self.template_mesh.textures)
-
+        #self.register_buffer('center', torch.zeros(1, 1, 3))
         # optimize for displacement map and center
         self.register_parameter('displace', nn.Parameter(torch.zeros_like(self.template_mesh.vertices)))
         self.register_parameter('center', nn.Parameter(torch.zeros(1, 1, 3)))
@@ -105,7 +105,7 @@ def neg_iou_loss(predict, target):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-i', '--data-dir', type=str, default='/home/mridul/Code/FyuseMesh/uxgpbaxotx/uxgpbaxotx/')
-    parser.add_argument('-t', '--template-mesh', type=str, default=os.path.join(current_dir, '../data/obj/sphere/sphere_642_s.obj'))
+    parser.add_argument('-t', '--template-mesh', type=str, default=os.path.join(current_dir, '../data/obj/sphere/sphere_1352.obj'))
     parser.add_argument('-o', '--output-dir', type=str, default=os.path.join(current_dir, '../data/results/output_deform'))
     parser.add_argument('-b', '--batch-size', type=int, default=120)
     args = parser.parse_args()
@@ -114,13 +114,14 @@ def main():
 
     model = Model(args.template_mesh).cuda()
     
-
+    print (args.output_dir)
 
     #Read in data ./ 
 
     poseData = PoseReader(args.data_dir)
     numFrames = len(poseData)
-
+    # numFrames = 1
+    print (numFrames)
     imagesGT = []
     projMatrices = []
 
@@ -138,11 +139,11 @@ def main():
     #print(projMatrices)
     projMatrices = projMatrices.cuda()
     
-    renderer = sr.SoftRenderer(image_size=256, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projMatrices, camera_direction=[0,0,+1], orig_size=256.0)
+    renderer = sr.SoftRenderer(image_size=256, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projMatrices, camera_direction=[0,0,-1], orig_size=256.0)
     optimizer = torch.optim.Adam(model.parameters(), 0.01, betas=(0.5, 0.99))
 
 
-    loop = tqdm.tqdm(list(range(0, 2000)))
+    loop = tqdm.tqdm(list(range(0, 10000)))
     writer = imageio.get_writer(os.path.join(args.output_dir, 'deform.gif'), mode='I')
     images_gt = torch.from_numpy(np.array(imagesGT)).cuda()
     
@@ -155,6 +156,11 @@ def main():
         # optimize mesh with silhouette reprojection error and 
         # geometry constraints
         #print (SilhouetteLoss(images_pred[:,3], images_gt), laplacian_loss, flatten_loss)
+        # for ii in range(numFrames) : 
+        #     imageio.imsave(os.path.join(args.output_dir, 'Debug/pred_%05d.png'%ii), (255*images_pred[ii, 3,:,:].detach().cpu().numpy()).astype(np.uint8))
+        #     imageio.imsave(os.path.join(args.output_dir, 'Debug/gt_%05d.png'%ii), (255*imagesGT[ii]).astype(np.uint8))
+
+        # break    
         loss = neg_iou_loss(images_pred[:, 3], images_gt) + \
                0.03 * laplacian_loss + \
                0.0003 * flatten_loss
@@ -167,7 +173,7 @@ def main():
 
         if i % 100 == 0:
             image = images_pred.detach().cpu().numpy()[0].transpose((1, 2, 0))
-            writer.append_data((255*image).astype(np.uint8))
+            writer.append_data((255*image[...,-1]).astype(np.uint8))
             imageio.imsave(os.path.join(args.output_dir, 'deform_%05d.png'%i), (255*image[..., -1]).astype(np.uint8))
             # save optimized mesh
     
