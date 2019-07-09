@@ -70,7 +70,7 @@ class Model(nn.Module):
         self.register_buffer('vertices', self.template_mesh.vertices * 0.5)
         self.register_buffer('faces', self.template_mesh.faces)
         self.register_buffer('textures', self.template_mesh.textures)
-        #self.register_buffer('center', torch.zeros(1, 1, 3))
+
         # optimize for displacement map and center
         self.register_parameter('displace', nn.Parameter(torch.zeros_like(self.template_mesh.vertices)))
         self.register_parameter('center', nn.Parameter(torch.zeros(1, 1, 3)))
@@ -94,7 +94,7 @@ class Model(nn.Module):
                        self.faces.repeat(batch_size, 1, 1)), laplacian_loss, flatten_loss
 
 
-def neg_iou_loss(predict, target):
+def SilhouetteLoss(predict, target):
     dims = tuple(range(predict.ndimension())[1:])
     intersect = (predict * target).sum(dims)
     union = (predict + target - predict * target).sum(dims) + 1e-6
@@ -104,10 +104,10 @@ def neg_iou_loss(predict, target):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-i', '--data-dir', type=str, default='/home/mridul/Code/FyuseMesh/uxgpbaxotx/uxgpbaxotx/')
-    parser.add_argument('-t', '--template-mesh', type=str, default=os.path.join(current_dir, '../data/obj/sphere/sphere_1352.obj'))
-    parser.add_argument('-o', '--output-dir', type=str, default=os.path.join(current_dir, '../data/results/output_deform'))
-    parser.add_argument('-b', '--batch-size', type=int, default=120)
+    parser.add_argument('-i', '--data_dir', type=str, default='/home/mridul/Code/FyuseMesh/uxgpbaxotx/uxgpbaxotx/')
+    parser.add_argument('-t', '--template_mesh', type=str, default=os.path.join(current_dir, '../data/obj/sphere/sphere_1352.obj'))
+    parser.add_argument('-o', '--output_dir', type=str, default=os.path.join(current_dir, '../data/results/output_deform'))
+    parser.add_argument('-b', '--batch_size', type=int, default=120)
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -136,14 +136,17 @@ def main():
 
 
     projMatrices = torch.stack(projMatrices)
-    #print(projMatrices)
+    
+    if __debug__:
+        print(projMatrices)
+    
     projMatrices = projMatrices.cuda()
     
     renderer = sr.SoftRenderer(image_size=256, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projMatrices, camera_direction=[0,0,-1], orig_size=256.0)
     optimizer = torch.optim.Adam(model.parameters(), 0.01, betas=(0.5, 0.99))
 
 
-    loop = tqdm.tqdm(list(range(0, 10000)))
+    loop = tqdm.tqdm(list(range(0, 2000)))
     writer = imageio.get_writer(os.path.join(args.output_dir, 'deform.gif'), mode='I')
     images_gt = torch.from_numpy(np.array(imagesGT)).cuda()
     
@@ -152,32 +155,37 @@ def main():
         mesh, laplacian_loss, flatten_loss = model(numFrames)
         images_pred = renderer.render_mesh(mesh)
 
-        #print(images_pred.shape)
-        # optimize mesh with silhouette reprojection error and 
-        # geometry constraints
-        #print (SilhouetteLoss(images_pred[:,3], images_gt), laplacian_loss, flatten_loss)
-        # for ii in range(numFrames) : 
-        #     imageio.imsave(os.path.join(args.output_dir, 'Debug/pred_%05d.png'%ii), (255*images_pred[ii, 3,:,:].detach().cpu().numpy()).astype(np.uint8))
-        #     imageio.imsave(os.path.join(args.output_dir, 'Debug/gt_%05d.png'%ii), (255*imagesGT[ii]).astype(np.uint8))
+        if __debug__:
+            print(images_pred.shape)
+            print (SilhouetteLoss(images_pred[:,3], images_gt), laplacian_loss, flatten_loss)
+            for ii in range(numFrames) : 
+                imageio.imsave(os.path.join(args.output_dir, 'Debug/pred_%05d.png'%ii), (255*images_pred[ii, 3,:,:].detach().cpu().numpy()).astype(np.uint8))
+                imageio.imsave(os.path.join(args.output_dir, 'Debug/gt_%05d.png'%ii), (255*imagesGT[ii]).astype(np.uint8))
 
-        # break    
-        loss = neg_iou_loss(images_pred[:, 3], images_gt) + \
-               0.03 * laplacian_loss + \
-               0.0003 * flatten_loss
+            break   
 
+        # optimize mesh with silhouette reprojection error and geometry constraints
+ 
+        loss = 10.*SilhouetteLoss(images_pred[:, 3], images_gt) + laplacian_loss + 0.0003 * flatten_loss 
         loop.set_description('Loss: %.4f'%(loss.item()))
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-        if i % 100 == 0:
-            image = images_pred.detach().cpu().numpy()[0].transpose((1, 2, 0))
-            writer.append_data((255*image[...,-1]).astype(np.uint8))
-            imageio.imsave(os.path.join(args.output_dir, 'deform_%05d.png'%i), (255*image[..., -1]).astype(np.uint8))
+        if i % 10 == 0:
+            images = images_pred.detach().cpu().numpy()
+            globalImg = np.zeros((4608,2560), dtype=np.uint8)
+            for ii in range(numFrames) : 
+                col = int(ii % 10)
+                row = int(ii / 10)
+                image = images[ii].transpose((1,2,0))
+                globalImg[row*256:row*256 + 256,col*256:col*256 + 256] = (255*image[...,-1]).astype(np.uint8)
+            
+            writer.append_data(globalImg)
+            imageio.imsave(os.path.join(args.output_dir, 'deform_%05d.png'%i), globalImg)
             # save optimized mesh
-    
-    model(1)[0].save_obj(os.path.join(args.output_dir, 'car.obj'), save_texture=False)
+            model(1)[0].save_obj(os.path.join(args.output_dir, 'car.obj'), save_texture=False)
 
 
 if __name__ == '__main__':
