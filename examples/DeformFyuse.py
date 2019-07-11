@@ -41,12 +41,9 @@ class PoseReader():
                 [intrinsics[0]*0.134, 0., intrinsics[3]*0.134], [0, intrinsics[1]*0.134, intrinsics[4]*0.134 + 56], [0, 0, 1]
             ]
 
-            # intrinsicsVector contains [fx,fy,skew,cx,cy]
             transforms['K'] = torch.Tensor(K)
-            transforms['Rt'] = torch.Tensor(pose['anchor']['transform']).reshape(4, 4)
-            tempR = torch.mm(transforms['Rt'][0:3,0:3],torch.tensor([[1.,0,0],[0,-1.,0],[0,0,-1.]])).transpose(0,1)
-            transforms['Rt'][0:3,0:3] = tempR.clone()
-            transforms['Rt'][0:3,3] = 1.0*torch.mv(tempR,transforms['Rt'][0:3,3])
+            transforms['Rt'] = torch.Tensor(pose['anchor']['transform']).reshape(4, 4).inverse()
+            #print (transforms['Rt'])
 
             self.poses[frame_num] = transforms
 
@@ -67,7 +64,7 @@ class Model(nn.Module):
 
         # set template mesh
         self.template_mesh = sr.Mesh.from_obj(template_path)
-        self.register_buffer('vertices', self.template_mesh.vertices * 0.5)
+        self.register_buffer('vertices', self.template_mesh.vertices)
         self.register_buffer('faces', self.template_mesh.faces)
         self.register_buffer('textures', self.template_mesh.textures)
 
@@ -105,11 +102,11 @@ def SilhouetteLoss(predict, target):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-i', '--data_dir', type=str, default='/home/mridul/Code/FyuseMesh/uxgpbaxotx/uxgpbaxotx/')
-    parser.add_argument('-t', '--template_mesh', type=str, default=os.path.join(current_dir, '../data/obj/sphere/sphere_1352.obj'))
+    parser.add_argument('-t', '--template_mesh', type=str, default=os.path.join(current_dir, '../data/obj/car/meshS124.obj'))
     parser.add_argument('-o', '--output_dir', type=str, default=os.path.join(current_dir, '../data/results/output_deform'))
     parser.add_argument('-b', '--batch_size', type=int, default=120)
     args = parser.parse_args()
-
+    torch.set_printoptions(profile="full")
     os.makedirs(args.output_dir, exist_ok=True)
 
     model = Model(args.template_mesh).cuda()
@@ -124,11 +121,14 @@ def main():
     print (numFrames)
     imagesGT = []
     projMatrices = []
-
+    flagSavedGT = False
+    lPoseData = list(poseData.poses)
     for ii in range(numFrames) :
         # print (poseData.poses.keys())
-        idx = list(poseData.poses)[ii]
+        idx = lPoseData[ii]
+        #print (idx)
         projMat = torch.mm(poseData.poses[idx]['K'],poseData.poses[idx]['Rt'][0:3,:])
+        #projMat = torch.mm(torch.tensor([[-1,0,0],[0,1.,0],[0,0,-1]]),projMat)
         imgGt = imageio.imread(args.data_dir+'Gt/{0:09d}'.format(idx)+'.jpg').astype('float32') / 255.0
         # swap axes ??
         imagesGT.append(imgGt)
@@ -142,8 +142,8 @@ def main():
     
     projMatrices = projMatrices.cuda()
     
-    renderer = sr.SoftRenderer(image_size=256, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projMatrices, camera_direction=[0,0,-1], orig_size=256.0)
-    optimizer = torch.optim.Adam(model.parameters(), 0.01, betas=(0.5, 0.99))
+    renderer = sr.SoftRenderer(image_size=256, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projMatrices, orig_size=256)
+    optimizer = torch.optim.Adam(model.parameters(), 0.001, betas=(0.5, 0.99))
 
 
     loop = tqdm.tqdm(list(range(0, 2000)))
@@ -166,27 +166,35 @@ def main():
 
         # optimize mesh with silhouette reprojection error and geometry constraints
  
-        loss = 10.*SilhouetteLoss(images_pred[:, 3], images_gt) + laplacian_loss + 0.0003 * flatten_loss 
+        loss = SilhouetteLoss(images_pred[:, 3], images_gt) + 0.3 * laplacian_loss + 0.0003 * flatten_loss 
         loop.set_description('Loss: %.4f'%(loss.item()))
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-
-        if i % 10 == 0:
+        
+        if i % 100 == 0:
             images = images_pred.detach().cpu().numpy()
             globalImg = np.zeros((4608,2560), dtype=np.uint8)
+            if not flagSavedGT : 
+                globalImgGt = np.zeros((4608,2560), dtype=np.uint8)
+
             for ii in range(numFrames) : 
                 col = int(ii % 10)
                 row = int(ii / 10)
                 image = images[ii].transpose((1,2,0))
                 globalImg[row*256:row*256 + 256,col*256:col*256 + 256] = (255*image[...,-1]).astype(np.uint8)
-            
+                if not flagSavedGT : 
+                    globalImgGt[row*256:row*256 + 256,col*256:col*256 + 256] = (255*imagesGT[ii]).astype(np.uint8)
+
             writer.append_data(globalImg)
             imageio.imsave(os.path.join(args.output_dir, 'deform_%05d.png'%i), globalImg)
+
             # save optimized mesh
             model(1)[0].save_obj(os.path.join(args.output_dir, 'car.obj'), save_texture=False)
-
+            if not flagSavedGT : 
+                imageio.imsave(os.path.join(args.output_dir, 'groundT_%05d.png'%i), globalImgGt)
+                flagSavedGT = True
 
 if __name__ == '__main__':
     main()

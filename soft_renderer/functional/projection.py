@@ -15,18 +15,11 @@ def projection(vertices, P, dist_coeffs, orig_size):
     y_ = y / (z + 1e-5)
 
     # Get distortion coefficients from vector
-    # k1 = dist_coeffs[:, None, 0]
-    # k2 = dist_coeffs[:, None, 1]
-    # p1 = dist_coeffs[:, None, 2]
-    # p2 = dist_coeffs[:, None, 3]
-    # k3 = dist_coeffs[:, None, 4]
-
     k1 = 0.
     k2 = 0.
-    k3 = 0.
     p1 = 0.
     p2 = 0.
-
+    k3 = 0.
 
     # we use x_ for x' and x__ for x'' etc.
     r = torch.sqrt(x_ ** 2 + y_ ** 2)
@@ -35,5 +28,4 @@ def projection(vertices, P, dist_coeffs, orig_size):
     x__ = 2 * (x__ - orig_size / 2.) / orig_size
     y__ = 2 * (y__ - orig_size / 2.) / orig_size
     vertices = torch.stack([x__,y__,z], dim=-1)
-    # vertices = torch.stack([x_,y_,z], dim=-1)
     return vertices

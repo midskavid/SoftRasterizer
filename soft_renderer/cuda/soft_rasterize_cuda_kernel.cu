@@ -316,7 +316,7 @@ __global__ void forward_soft_rasterize_cuda_kernel(
     const int nf = num_faces;
     const int bn = i / (is * is);
     const int pn = i % (is * is);
-    const int yi = is - 1 - (pn / is);
+    const int yi = (pn / is);
     const int xi = pn % is;
     const scalar_t yp = (2. * yi + 1. - is) / is;
     const scalar_t xp = (2. * xi + 1. - is) / is;
@@ -497,7 +497,7 @@ __global__ void backward_soft_rasterize_cuda_kernel(
     const int nf = num_faces;
     const int bn = i / (is * is);
     const int pn = i % (is * is);
-    const int yi = is - 1 - (pn / is);
+    const int yi = (pn / is);
     const int xi = pn % is;
     const scalar_t yp = (2. * yi + 1 - is) / is;
     const scalar_t xp = (2. * xi + 1 - is) / is;

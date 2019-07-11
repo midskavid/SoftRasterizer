@@ -88,9 +88,10 @@ def main():
     viewpoints = torch.from_numpy(cameras[:, 2])
     renderer.transform.set_eyes_from_angles(camera_distances, elevations, viewpoints)
 
-    loop = tqdm.tqdm(list(range(0, 200)))
+    loop = tqdm.tqdm(list(range(0, 2000)))
     writer = imageio.get_writer(os.path.join(args.output_dir, 'deform.gif'), mode='I')
     images_gt = torch.from_numpy(images).cuda()
+    flagSavedGT = False
     for i in loop:
         
 
@@ -109,10 +110,37 @@ def main():
         loss.backward()
         optimizer.step()
 
-        if i % 100 == 0:
-            image = images_pred.detach().cpu().numpy()[0].transpose((1, 2, 0))
-            writer.append_data((255*image[...,-1]).astype(np.uint8))
-            imageio.imsave(os.path.join(args.output_dir, 'deform_%05d.png'%i), (255*image[..., -1]).astype(np.uint8))
+
+        if __debug__:
+            for ii in range(args.batch_size) : 
+                imageio.imsave(os.path.join(args.output_dir, 'Debug/pred_%05d.png'%ii), (255*images_pred[ii, 3,:,:].detach().cpu().numpy()).astype(np.uint8))
+                print (images[ii,3,:,:])
+                imageio.imsave(os.path.join(args.output_dir, 'Debug/gt_%05d.png'%ii), (255*images[ii].transpose(1,2,0)).astype(np.uint8))
+
+            break   
+
+
+        if i % 10 == 0:
+            images = images_pred.detach().cpu().numpy()
+            globalImg = np.zeros((832, 640), dtype=np.uint8)
+            if not flagSavedGT : 
+                globalImgGt = np.zeros((832, 640), dtype=np.uint8)
+
+            for ii in range(args.batch_size) : 
+                col = int(ii % 10)
+                row = int(ii / 10)
+                image = images[ii].transpose((1,2,0))
+                globalImg[row*64:row*64 + 64,col*64:col*64 + 64] = (255*image[...,-1]).astype(np.uint8)
+                if not flagSavedGT : 
+                    globalImgGt[row*64:row*64 + 64,col*64:col*64 + 64] = (255*images_gt.detach().cpu().numpy()[ii,3,:,:]).astype(np.uint8)
+
+            
+            writer.append_data(globalImg)
+            imageio.imsave(os.path.join(args.output_dir, 'deform_%05d.png'%i), globalImg)
+            if not flagSavedGT : 
+                imageio.imsave(os.path.join(args.output_dir, 'groundT_%05d.png'%i), globalImgGt)
+                flagSavedGT = True
+
 
     # save optimized mesh
     model(1)[0].save_obj(os.path.join(args.output_dir, 'plane.obj'), save_texture=False)
