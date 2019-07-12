@@ -1,3 +1,4 @@
+# CUDA_VISIBLE_DEVICES=1 python3 -O examples/DeformFyuse.py --output_dir ~/Code/SoftRas/data/results/output_deform1 --template_mesh ~/Code/SoftRas/data/obj/car/meshS124.obj --image_size 256 --template_mesh ~/Code/SoftRas/data/obj/sphere/sphere_642_s.obj
 import torch
 import os
 import tqdm
