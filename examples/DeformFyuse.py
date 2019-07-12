@@ -22,7 +22,9 @@ class PoseReader():
         with open(scenemodel_path, 'r') as f:
             poses = json.load(f)
         # crops_path = os.path.join(root_dir, fyuse_id, "Crops")
-        jpg_ids = set([int(x.split("/")[-1].split(".")[0]) for x in glob.glob(fyuse_dir + "GtRed/*.jpg")])
+        jpg_ids = set([int(x.split("/")[-1].split(".")[0]) for x in glob.glob(fyuse_dir + "GtRedRed/*.jpg")])
+        if len(jpg_ids) == 0 : 
+            jpg_ids = set([int(x.split("/")[-1].split(".")[0]) for x in glob.glob(fyuse_dir + "GtRedRed/*.png")])
         # Make a data structure that has a dictionary with distortion matrix, intrinsics and [R|t] that is looked
         # up by frame id
         self.poses = {}
@@ -38,8 +40,9 @@ class PoseReader():
             intrinsics = torch.Tensor(pose['anchor']['intrinsicsVector'])
 
             K = [
-                [intrinsics[0]*0.134, 0., intrinsics[3]*0.134], [0, intrinsics[1]*0.134, intrinsics[4]*0.134 + 56], [0, 0, 1]
+                [intrinsics[0], intrinsics[2], intrinsics[3]-0.5], [0, intrinsics[1], intrinsics[4] + 420-0.5], [0, 0, 1]
             ]
+
 
             transforms['K'] = torch.Tensor(K)
             transforms['Rt'] = torch.Tensor(pose['anchor']['transform']).reshape(4, 4).inverse()
@@ -104,33 +107,35 @@ def main():
     parser.add_argument('-i', '--data_dir', type=str, default='/home/mridul/Code/FyuseMesh/uxgpbaxotx/uxgpbaxotx/')
     parser.add_argument('-t', '--template_mesh', type=str, default=os.path.join(current_dir, '../data/obj/car/meshS124.obj'))
     parser.add_argument('-o', '--output_dir', type=str, default=os.path.join(current_dir, '../data/results/output_deform'))
-    parser.add_argument('-b', '--batch_size', type=int, default=120)
+    parser.add_argument('-is', '--image_size', type=int, default=256)
+    parser.add_argument('-is', '--orig_image_size', type=int, default=1920)
     args = parser.parse_args()
     torch.set_printoptions(profile="full")
+    
     os.makedirs(args.output_dir, exist_ok=True)
 
     model = Model(args.template_mesh).cuda()
-    
-    print (args.output_dir)
 
     #Read in data ./ 
 
     poseData = PoseReader(args.data_dir)
     numFrames = len(poseData)
-    # numFrames = 1
+    
     print (numFrames)
     imagesGT = []
     projMatrices = []
     flagSavedGT = False
     lPoseData = list(poseData.poses)
     for ii in range(numFrames) :
-        # print (poseData.poses.keys())
         idx = lPoseData[ii]
-        #print (idx)
         projMat = torch.mm(poseData.poses[idx]['K'],poseData.poses[idx]['Rt'][0:3,:])
-        #projMat = torch.mm(torch.tensor([[-1,0,0],[0,1.,0],[0,0,-1]]),projMat)
-        imgGt = imageio.imread(args.data_dir+'Gt/{0:09d}'.format(idx)+'.jpg').astype('float32') / 255.0
-        # swap axes ??
+        try :
+            imgGt = imageio.imread(args.data_dir+'GtRedRed/{0:08d}'.format(idx)+'.png').astype('float32') / 255.0
+        except :
+            try :
+                imgGt = imageio.imread(args.data_dir+'GtRedRed/{0:09d}'.format(idx)+'.jpg').astype('float32') / 255.0
+            except e:
+                raise(e)
         imagesGT.append(imgGt)
         projMatrices.append(projMat)
 
@@ -142,8 +147,8 @@ def main():
     
     projMatrices = projMatrices.cuda()
     
-    renderer = sr.SoftRenderer(image_size=256, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projMatrices, orig_size=256)
-    optimizer = torch.optim.Adam(model.parameters(), 0.001, betas=(0.5, 0.99))
+    renderer = sr.SoftRenderer(image_size=args.image_size, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projMatrices, orig_size=args.orig_image_size)
+    optimizer = torch.optim.Adam(model.parameters(), 0.0005, betas=(0.5, 0.99))
 
 
     loop = tqdm.tqdm(list(range(0, 2000)))
@@ -172,23 +177,25 @@ def main():
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+
+        if not flagSavedGT : 
+            globalImgGt = np.zeros((args.image_size*int(numFrames/10 + 1),args.image_size*10), dtype=np.uint8)
+
         
         if i % 100 == 0:
             images = images_pred.detach().cpu().numpy()
-            globalImg = np.zeros((4608,2560), dtype=np.uint8)
-            if not flagSavedGT : 
-                globalImgGt = np.zeros((4608,2560), dtype=np.uint8)
+            globalImg = 255 * np.ones((args.image_size*int(numFrames/10 + 1),args.image_size*10), dtype=np.uint8)
 
             for ii in range(numFrames) : 
                 col = int(ii % 10)
                 row = int(ii / 10)
                 image = images[ii].transpose((1,2,0))
-                globalImg[row*256:row*256 + 256,col*256:col*256 + 256] = (255*image[...,-1]).astype(np.uint8)
+                globalImg[row*args.image_size:row*args.image_size + args.image_size,col*args.image_size:col*args.image_size + args.image_size] = (255 - 255*image[...,-1]).astype(np.uint8)
                 if not flagSavedGT : 
-                    globalImgGt[row*256:row*256 + 256,col*256:col*256 + 256] = (255*imagesGT[ii]).astype(np.uint8)
+                    globalImgGt[row*args.image_size:row*args.image_size + args.image_size,col*args.image_size:col*args.image_size + args.image_size] = (128*imagesGT[ii]).astype(np.uint8)
 
-            writer.append_data(globalImg)
-            imageio.imsave(os.path.join(args.output_dir, 'deform_%05d.png'%i), globalImg)
+            writer.append_data(globalImg+globalImgGt)
+            imageio.imsave(os.path.join(args.output_dir, 'deform_%05d.png'%i), globalImg+globalImgGt)
 
             # save optimized mesh
             model(1)[0].save_obj(os.path.join(args.output_dir, 'car.obj'), save_texture=False)
