@@ -34,11 +34,12 @@ class PoseReader():
                 continue
             # Only load in the poses that have corresponding frames in Crops folder!! TODO
             transforms = {}
-            transforms['distortion'] = torch.Tensor(pose['anchor']['distortion'])
-            # Distortion is [k1, k2, p1, p2] reference:
-            # https://docs.opencv.org/2.4/modules/calib3d/doc/camera_calibration_and_3d_reconstruction.html
-            intrinsics = torch.Tensor(pose['anchor']['intrinsicsVector'])
 
+            # Distortion is [k1, k2, p1, p2, k3] reference:
+            # https://docs.opencv.org/2.4/modules/calib3d/doc/camera_calibration_and_3d_reconstruction.html
+            transforms['distortion'] = torch.Tensor(pose['anchor']['distortion'] + [0.])
+
+            intrinsics = torch.Tensor(pose['anchor']['intrinsicsVector'])
             K = [
                 [intrinsics[0], intrinsics[2], intrinsics[3]-0.5], [0, intrinsics[1], intrinsics[4] + 420-0.5], [0, 0, 1]
             ]
@@ -46,7 +47,6 @@ class PoseReader():
 
             transforms['K'] = torch.Tensor(K)
             transforms['Rt'] = torch.Tensor(pose['anchor']['transform']).reshape(4, 4).inverse()
-            #print (transforms['Rt'])
 
             self.poses[frame_num] = transforms
 
@@ -108,7 +108,7 @@ def main():
     parser.add_argument('-t', '--template_mesh', type=str, default=os.path.join(current_dir, '../data/obj/car/meshS124.obj'))
     parser.add_argument('-o', '--output_dir', type=str, default=os.path.join(current_dir, '../data/results/output_deform'))
     parser.add_argument('-is', '--image_size', type=int, default=256)
-    parser.add_argument('-is', '--orig_image_size', type=int, default=1920)
+    parser.add_argument('-os', '--orig_image_size', type=int, default=1920)
     args = parser.parse_args()
     torch.set_printoptions(profile="full")
     
@@ -121,9 +121,10 @@ def main():
     poseData = PoseReader(args.data_dir)
     numFrames = len(poseData)
     
-    print (numFrames)
+    print ('No of frames : ',numFrames)
     imagesGT = []
     projMatrices = []
+    distCoeffs = []
     flagSavedGT = False
     lPoseData = list(poseData.poses)
     for ii in range(numFrames) :
@@ -138,17 +139,18 @@ def main():
                 raise(e)
         imagesGT.append(imgGt)
         projMatrices.append(projMat)
+        distCoeffs.append(poseData.poses[idx]['distortion'])
 
 
     projMatrices = torch.stack(projMatrices)
-    
+    distCoeffs = torch.stack(distCoeffs)
     if __debug__:
         print(projMatrices)
     
     projMatrices = projMatrices.cuda()
     
-    renderer = sr.SoftRenderer(image_size=args.image_size, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projMatrices, orig_size=args.orig_image_size)
-    optimizer = torch.optim.Adam(model.parameters(), 0.0005, betas=(0.5, 0.99))
+    renderer = sr.SoftRenderer(image_size=args.image_size, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projMatrices, dist_coeffs=distCoeffs, orig_size=args.orig_image_size)
+    optimizer = torch.optim.Adam(model.parameters(), 0.001, betas=(0.5, 0.99))
 
 
     loop = tqdm.tqdm(list(range(0, 2000)))

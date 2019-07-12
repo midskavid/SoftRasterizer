@@ -15,11 +15,11 @@ def projection(vertices, P, dist_coeffs, orig_size):
     y_ = y / (z + 1e-5)
 
     # Get distortion coefficients from vector
-    k1 = 0.
-    k2 = 0.
-    p1 = 0.
-    p2 = 0.
-    k3 = 0.
+    k1 = dist_coeffs[:, None, 0]
+    k2 = dist_coeffs[:, None, 1]
+    p1 = dist_coeffs[:, None, 2]
+    p2 = dist_coeffs[:, None, 3]
+    k3 = dist_coeffs[:, None, 4]
 
     # we use x_ for x' and x__ for x'' etc.
     r = torch.sqrt(x_ ** 2 + y_ ** 2)
