@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 import numpy as np
-
+import soft_renderer as sr
 
 class Encoder(nn.Module):
     def __init__(self):
@@ -37,3 +37,24 @@ class Decoder(nn.Module):
 		self.fc3 = nn.Linear(1024, numVertices*3)
 		self.bn3 = nn.BatchNorm1d(numVertices*3)
 		self.ac3 = nn.LeakyReLU(negative_slope=0.2)
+
+
+class Model():
+    def __init__(self, faces, vertices):
+        # set template mesh
+        # Assuming faces, vertices are batch, num, 3
+        self.template_mesh = sr.Mesh(vertices, faces)
+        self.register_buffer('vertices', self.template_mesh.vertices)
+        self.register_buffer('faces', self.template_mesh.faces)
+
+    def forward(self, batch_size, center, displace):
+    	# would be batchx3 batchxnumvertx3
+        base = torch.log(self.vertices.abs() / (1 - self.vertices.abs()))
+        centroid = torch.tanh(center)
+        vertices = torch.sigmoid(base + self.displace) * torch.sign(self.vertices)
+        # need to figure out these two transformations
+        vertices = F.relu(vertices) * (1 - centroid) - F.relu(-vertices) * (centroid + 1)
+        vertices = vertices + centroid
+
+        return sr.Mesh(vertices.repeat(batch_size, 1, 1), self.faces.repeat(batch_size, 1, 1))
+
