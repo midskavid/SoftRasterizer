@@ -20,9 +20,10 @@ parser.add_argument('--experiment', default=None, help='the path to store sample
 # The basic training setting
 parser.add_argument('--nepoch', type=int, default=100, help='the number of epochs for training')
 parser.add_argument('--batchSize', type=int, default=2, help='input batch size')
-parser.add_argument('--numViews', type=int, default=20, help='views for training')
+parser.add_argument('--numViews', type=int, default=15, help='views for training')
 parser.add_argument('--validationSplit', type=float, default=0.1, help='data used for validation')
 parser.add_argument('--imageSize', type=int, default=256, help='the height / width of the input image to network')
+parser.add_argument('--pad', type=int, default=420, help='The amount of padding added at top and bottom of image')
 parser.add_argument('--cuda', action='store_true', help='enables cuda')
 parser.add_argument('--deviceIds', type=int, nargs='+', default=[0], help='the gpus used for training network')
 # The training weight
@@ -88,7 +89,7 @@ opDecoderInit = optim.Adam(decoderInit.parameters(), lr=1e-4 * scale, betas=(0.5
 
 ####################################
 # Data Loaders..
-fyuseDataset = DataLoader.BatchLoader(opt.dataRoot, imSize = opt.imageSize)
+fyuseDataset = DataLoader.BatchLoader(opt.dataRoot, imSize=opt.imageSize, numViews=opt.numViews, padding=opt.pad)
 datasetSize = len(fyuseDataset)
 indices = list(range(datasetSize))
 np.random.shuffle(indices)
@@ -128,5 +129,10 @@ for epoch in range(opt.nepoch):
 
         # Iterate over data.
         for ii, dataBatch in dataLoaders[phase]:
-        	
+        	# Dataloader would return me Projection matrices and the input images and ground truth images. 
+        	# The manner in which dataloader creates batch, I will have to reshape them to have batch = batch*numViews
+        	# For mesh vertices and faces, I will get the correct format batchxnumVertx3.
+        	# This will be changed to the appropriate format with the forward of the dataloader.
+
+
 

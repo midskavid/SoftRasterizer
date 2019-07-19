@@ -43,18 +43,20 @@ class Model():
     def __init__(self, faces, vertices):
         # set template mesh
         # Assuming faces, vertices are batch, num, 3
+        # The mesh class they have is such that they work with multiple meshes.. 
+        # So the vertices and faces here would be for multiple(batchNum) meshes
         self.template_mesh = sr.Mesh(vertices, faces)
         self.register_buffer('vertices', self.template_mesh.vertices)
         self.register_buffer('faces', self.template_mesh.faces)
 
-    def forward(self, batch_size, center, displace):
-    	# would be batchx3 batchxnumvertx3
+    def forward(self, batch_size, center, displace, numViews):
+    	# center, displace would be batchx3, batchxnumvertx3
         base = torch.log(self.vertices.abs() / (1 - self.vertices.abs()))
         centroid = torch.tanh(center)
         vertices = torch.sigmoid(base + self.displace) * torch.sign(self.vertices)
-        # need to figure out these two transformations
-        vertices = F.relu(vertices) * (1 - centroid) - F.relu(-vertices) * (centroid + 1)
+        # need to figure out this transformation
+        vertices = F.relu(vertices) * (1 - centroid[:, None, :]) - F.relu(-vertices) * (centroid[:,None, :] + 1)
         vertices = vertices + centroid
 
-        return sr.Mesh(vertices.repeat(batch_size, 1, 1), self.faces.repeat(batch_size, 1, 1))
+        return sr.Mesh(vertices.repeat(1, numViews, 1), self.faces.repeat(1, numViews, 1))
 

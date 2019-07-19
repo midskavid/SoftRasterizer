@@ -3,31 +3,34 @@ import random
 import json
 import os
 import numpy as np
+import imageio
 
+from PIL import Image
 from torch.utils.data import Dataset
-
+from skimage.util import img_as_float
 
 class BatchLoader(Dataset):
-    def __init__(self, dataRoot, imSize = 256, isRandom=True, pad=420, rseed = None):
+    def __init__(self, dataRoot, imSize = 256, isRandom=True, padding=420, numViews=20, rseed = None):
         self.dataRoot = dataRoot
         self.imSize = imSize
+        self.numViews = numViews
 
-        f = open(os.path.join(dataRoot,'fyuse_ids.txt','r'))
-        dataFyuseList = [ids.strip() for ids in f]
+        f = open(os.path.join(self.dataRoot,'fyuse_ids.txt','r'))
+        self.dataFyuseList = [ids.strip() for ids in f]
         f.close()
-        random.shuffle(dataFyuseList) # Permute..
+        random.shuffle(self.dataFyuseList) # Permute..
 
         # Now train eval split...
 
         self.dataViewMaskNames = {}
         self.dataProjectionMat = {}
-        for idx in dataFyuseList : 
-            self.dataViewMaskNames[idx] = glob.glob(os.path.join(dataroot, 'Normalized/Depths/',idx,'/depth*.png'))
-            self.dataProjectionMat[idx] = ParsePoses(dataRoot, idx, self.dataViewMaskNames[idx], pad)
+        for idx in self.dataFyuseList : 
+            self.dataViewMaskNames[idx] = glob.glob(os.path.join(self.dataRoot, 'Normalized/Depths/',idx,'/depth*.png'))
+            self.dataProjectionMat[idx] = self.ParsePoses(self.dataRoot, idx, self.dataViewMaskNames[idx], pad)
 
 
-        # Load Mesh here??
-
+        # Load template mesh here..
+        self.templateVertex, self.templateFaces = self.LoadObjMesh(os.path.join(self.dataRoot,'template_mesh.obj'))
             
 
 
@@ -36,37 +39,34 @@ class BatchLoader(Dataset):
 
 
     def __getitem__(self, ind):
-        
 
+        # Load Image.. pick one randomly..
+        indexes = random.sample(range(len(self.dataViewMaskNames[ind])), self.numViews + 1)
+        # Load input image from JPEG images.. pad image accordingly : 
+        frame = self.dataViewMaskNames[ind].split('/')[-1].replace('depth','').replace('.png','.jpg')
+        imgInput = LoadImage(os.path.join(self.dataRoot, 'JPEGImages', self.dataFyuseList[ind]+'_'+frame))
+        # read the corresponding mask...
 
-        batchDict = {'albedo': albedo,
-                     'normal': normal,
-                     'rough': rough,
-                     'depth': depth,
-                     'seg': seg,
-                     'imP': imP,
-                     'imE':  imE,
-                     'imEbg': imEbg,
-                     'SH': SH,
-                     'name': name,
-                     'albedoName': self.albedoList[self.perm[ind] ],
-                     'realImage': imReal,
-                     'realImageMask': segReal}
-
-
+        batchDict = {'ImgInput': imgInput,
+                     'ImgViews': imgViews,
+                    }
 
         return batchDict
 
 
-    def loadImage(self, imName, isGama = False):
+    def LoadImage(self, imName, isGama = False):
         if not os.path.isfile(imName):
             print('Fail to load {0}'.format(imName) )
             im = np.zeros([3, self.imSize, self.imSize], dtype=np.float32)
             return im
 
         im = Image.open(imName)
-        im = self.imResize(im)
-        im = np.asarray(im, dtype=np.float32)
+        imSq = Image.new('RGB', (960,960), (0,0,0)) ####Hardcoding
+        imSq.paste(im, (0,210)) ####Hardcoding
+        imSq = self.ImResize(imSq)
+        im = np.asarray(imSq, dtype=np.float32)
+
+        #### Image being fed to the network has to be normalized but the different views should not be normalized...
         if isGama:
             im = (im / 255.0) ** 2.2
             im = 2 * im - 1
@@ -77,15 +77,41 @@ class BatchLoader(Dataset):
         im = np.transpose(im, [2, 0, 1])
         return im
 
-    def imResize(self, im):
+    def LoadMaskFromDepth(self, imName) :
+        if not os.path.isfile(imName):
+            print('Fail to load {0}'.format(imName) )
+            im = np.zeros([3, self.imSize, self.imSize], dtype=np.float32)
+            return im
+
+        # im = Image.open(imName)
+        # imSq = Image.new('RGB', (1920,1920), (0,0,0)) ####Hardcoding
+        # imSq.paste(im, (0,420)) ####Hardcoding
+        # imSq = self.ImResize(imSq)
+        # im = np.asarray(imSq)
+        # im = img_as_float(im)
+        # im2 = np.zeros((self.imSize,self.imSize))
+        # im2[np.where(im < 1.)] = 0.
+
+        # PIL does not have a 16bit read.. therefore all this conversion between numpy and PIL
+
+        Im = imageio.imread(imName)
+        Im2 = np.ones((1080,1920))
+        Im1 = img_as_float(Im)
+        Im2[np.where(Im1 < 1.)] = 0.
+        Im2 = (255-255*Im2).astype(np.uint8)
+        im = Image.fromarray(Im2, 'L')
+        imSq = Image.new('L', (1920,1920), (0)) ####Hardcoding
+        imSq.paste(im, (0,420)) ####Hardcoding
+        imSq = imSq.resize((256, 256), Image.ANTIALIAS)
+        im = np.asarray(imSq)        
+        return im
+
+
+    def ImResize(self, im):
         w0, h0 = im.size
         assert( (w0 == h0) )
         im = im.resize((self.imSize, self.imSize), Image.ANTIALIAS)
         return im
-
-    def loadNpy(self, name):
-        data = np.load(name)
-        return data
 
     def ParsePoses(self, dataRoot, fyuseId, views, pad=420):
         scenemodel_path = os.path.join(dataRoot, 'Normalized/ScenemodelFiles', fyuseId+'_scenemodel_raw.json')
@@ -113,3 +139,24 @@ class BatchLoader(Dataset):
             allPoses[frame_num] = transforms
         return allPoses
 
+    def LoadObjMesh(filename):
+        vertices = []
+        faces = []
+        f = open(filename,'r')
+        for line in f:
+            words = line.split()
+            if len(words) == 0:
+                continue
+            if words[0] == 'v':
+                vertices.append([float(v) for v in words[1:4]])
+
+            if words[0] == 'f':
+                v0 = int(words[1])
+                v1 = int(words[2])
+                v2 = int(words[3])
+                faces.append([v0, v1, v2])
+        vertices = np.vstack(vertices).astype(np.float32)
+        faces = np.vstack(faces).astype(np.int32) - 1 ##### ASSUMING START FROM 1
+        f.close()
+        
+        return vertices, faces
