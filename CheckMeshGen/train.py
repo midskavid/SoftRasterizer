@@ -138,9 +138,10 @@ for epoch in range(opt.nepoch):
             imgViews = dataBatch['ImgViews'].cuda()
             projViews = dataBatch['ProjViews'].cuda()
             distViews = dataBatch['DistViews'].cuda()
-            imgMaskedInput = torch.cat([imgInput,imgInputMsk.expand_as(imgInput)], dim=1)
+            imgMaskedInput = torch.cat([imgInput,imgInputMsk], dim=1)
             features = encoderInit(imgMaskedInput)
             outPos = decoderInit(features)
+            print (outPos.shape)
             break
 
 

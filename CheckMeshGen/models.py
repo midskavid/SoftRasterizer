@@ -40,6 +40,7 @@ class Encoder(nn.Module):
 class Decoder(nn.Module):
     def __init__(self, numVertices=642):
         super(Decoder, self).__init__()
+        self.numVertices = numVertices
         self.fc1 = nn.Linear(512, 1024)
         self.bn1 = nn.BatchNorm1d(1024)
         self.ac1 = nn.LeakyReLU(negative_slope=0.2)
@@ -55,7 +56,7 @@ class Decoder(nn.Module):
         x2 = self.ac2(self.bn2(self.fc2(x1)))
         # x3 = self.ac3(self.bn3(self.fc3(x2)))
         x3 = self.bn3(self.fc3(x2))
-        return x3
+        return x3.reshape((-1,self.numVertices,3))
 
 class Model():
     def __init__(self, faces, vertices):

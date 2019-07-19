@@ -134,7 +134,8 @@ class BatchLoader(Dataset):
             imSq = Image.new('L', (1920,1920), (0)) ####Hardcoding
             imSq.paste(im, (0,420)) ####Hardcoding
             imSq = imSq.resize((self.imSize, self.imSize), Image.ANTIALIAS)
-            im = np.asarray(imSq).astype('float32')/255.0        
+            im = np.asarray(imSq).astype('float32')/255.0
+            im = im[np.newaxis]        
         except :
             print (imName)
             raise
