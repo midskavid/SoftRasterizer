@@ -3,7 +3,7 @@ import argparse
 import random
 import os
 import models
-import utils
+#import utils
 import DataLoader
 import torch.nn as nn
 import numpy as np
@@ -11,7 +11,7 @@ import torch.optim as optim
 import torchvision.utils as vutils
 
 from torch.autograd import Variable
-from torch.utils.data import DataLoader
+#from torch.utils.data import DataLoader
 
 parser = argparse.ArgumentParser()
 # The locationi of training set
@@ -65,7 +65,7 @@ imInputMaskBatch = Variable(torch.FloatTensor(opt.batchSize, 1, opt.imageSize, o
 
 # initialize models
 encoderInit = nn.DataParallel(models.Encoder(), device_ids = opt.deviceIds)
-decoderInit = nn.DataParallel(models.Decoder(numVertices=642), device_ids = opt.deviceIds)
+decoderInit = nn.DataParallel(models.Decoder(numVertices=642+1), device_ids = opt.deviceIds) # Center to be predicted too
 
 
 ##############  ######################
@@ -98,12 +98,12 @@ split = int(np.floor(opt.validationSplit * datasetSize))
 trainIndices, valIndices = indices[split:], indices[:split]
 
 # Creating PT data samplers and loaders:
-trainSampler = SubsetRandomSampler(trainIndices)
-validSampler = SubsetRandomSampler(valIndices)
+trainSampler = torch.utils.data.SubsetRandomSampler(trainIndices)
+validSampler = torch.utils.data.SubsetRandomSampler(valIndices)
 
 # TODO : check the significance of shuffle here...
-trainLoader = DataLoader(fyuseDataset, batch_size=opt.batchSize, sampler=trainSampler, num_workers = 4, shuffle = False)
-validationLoader = DataLoader(fyuseDataset, batch_size=opt.batchSize, sampler=validSampler, num_workers = 4, shuffle = False)
+trainLoader = torch.utils.data.DataLoader(fyuseDataset, batch_size=opt.batchSize, sampler=trainSampler, num_workers = 8, shuffle = False)
+validationLoader = torch.utils.data.DataLoader(fyuseDataset, batch_size=opt.batchSize, sampler=validSampler, num_workers = 8, shuffle = False)
 dataLoaders = {"train": trainLoader, "val": validationLoader}
 dataLengths = {"train": len(trainLoader), "val": len(validationLoader)}
 ######################################
@@ -113,7 +113,7 @@ dataLengths = {"train": len(trainLoader), "val": len(validationLoader)}
 
 
 for epoch in range(opt.nepoch):
-    print('Epoch {}/{}'.format(epoch, nepoch - 1))
+    print('Epoch {}/{}'.format(epoch, opt.nepoch - 1))
     print('-' * 10)
 
     # Each epoch has a training and validation phase
@@ -128,11 +128,21 @@ for epoch in range(opt.nepoch):
         running_loss = 0.0
 
         # Iterate over data.
-        for ii, dataBatch in dataLoaders[phase]:
-        	# Dataloader would return me Projection matrices and the input images and ground truth images. 
-        	# The manner in which dataloader creates batch, I will have to reshape them to have batch = batch*numViews
-        	# For mesh vertices and faces, I will get the correct format batchxnumVertx3.
-        	# This will be changed to the appropriate format with the forward of the dataloader.
+        for ii, dataBatch in enumerate(dataLoaders[phase]):
+            # Dataloader would return me Projection matrices and the input images and ground truth images. 
+            # The manner in which dataloader creates batch, I will have to reshape them to have batch = batch*numViews
+            # For mesh vertices and faces, I will get the correct format batchxnumVertx3.
+            # This will be changed to the appropriate format with the forward of the dataloader.
+            imgInput = dataBatch['ImgInput'].cuda()
+            imgInputMsk = dataBatch['ImgInputMsk'].cuda()
+            imgViews = dataBatch['ImgViews'].cuda()
+            projViews = dataBatch['ProjViews'].cuda()
+            distViews = dataBatch['DistViews'].cuda()
+            imgMaskedInput = torch.cat([imgInput,imgInputMsk.expand_as(imgInput)], dim=1)
+            features = encoderInit(imgMaskedInput)
+            outPos = decoderInit(features)
+            break
+
 
 
 

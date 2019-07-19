@@ -15,7 +15,7 @@ class BatchLoader(Dataset):
         self.imSize = imSize
         self.numViews = numViews
 
-        f = open(os.path.join(self.dataRoot,'fyuse_ids.txt','r'))
+        f = open(os.path.join(self.dataRoot,'fyuse_ids.txt'),'r')
         self.dataFyuseList = [ids.strip() for ids in f]
         f.close()
         random.shuffle(self.dataFyuseList) # Permute..
@@ -24,13 +24,16 @@ class BatchLoader(Dataset):
 
         self.dataViewMaskNames = {}
         self.dataProjectionMat = {}
-        for idx in self.dataFyuseList : 
-            self.dataViewMaskNames[idx] = glob.glob(os.path.join(self.dataRoot, 'Normalized/Depths/',idx,'/depth*.png'))
-            self.dataProjectionMat[idx] = self.ParsePoses(self.dataRoot, idx, self.dataViewMaskNames[idx], pad)
+        for idx in self.dataFyuseList :
+            self.dataViewMaskNames[idx] = glob.glob(os.path.join(self.dataRoot, 'Normalized/Depths/',idx,'depth*.png'))
+            self.dataProjectionMat[idx] = self.ParsePoses(self.dataRoot, idx, self.dataViewMaskNames[idx], padding)
 
 
         # Load template mesh here..
         self.templateVertex, self.templateFaces = self.LoadObjMesh(os.path.join(self.dataRoot,'template_mesh.obj'))
+        # print (self.dataFyuseList)
+        # print (self.dataViewMaskNames)
+        # print (self.dataProjectionMat)
             
 
 
@@ -41,14 +44,41 @@ class BatchLoader(Dataset):
     def __getitem__(self, ind):
 
         # Load Image.. pick one randomly..
-        indexes = random.sample(range(len(self.dataViewMaskNames[ind])), self.numViews + 1)
+        fyuseId = self.dataFyuseList[ind]
+        try :
+            indexes = random.sample(range(len(self.dataViewMaskNames[fyuseId])), self.numViews + 1)
+        except : 
+            print (fyuseId)
+            raise
         # Load input image from JPEG images.. pad image accordingly : 
-        frame = self.dataViewMaskNames[ind].split('/')[-1].replace('depth','').replace('.png','.jpg')
-        imgInput = LoadImage(os.path.join(self.dataRoot, 'JPEGImages', self.dataFyuseList[ind]+'_'+frame))
+        frame = self.dataViewMaskNames[fyuseId][indexes[0]].split('/')[-1].replace('depth','').replace('.png','.jpg')
+        imgInput = self.LoadImage(os.path.join(self.dataRoot, 'JPEGImages', fyuseId+'_'+frame))
         # read the corresponding mask...
+        imgInputMsk = self.LoadMaskFromDepth(self.dataViewMaskNames[fyuseId][indexes[0]])
+
+        # Now view info.. image and projection matrix : 
+        imgViews = []
+        projViews = []
+        distViews = []
+        lPoseData = list(self.dataProjectionMat[fyuseId])
+        for ii in range(self.numViews): 
+            #frame = int(self.dataViewMaskNames[fyuseId][indexes[0]].split('/')[-1].replace('depth','').replace('.png',''))
+            imgViews.append(self.LoadMaskFromDepth(self.dataViewMaskNames[fyuseId][indexes[ii+1]]))
+            # print (fyuseId)
+            # print (lPoseData[indexes[ii]])
+            # print (self.dataProjectionMat[fyuseId], indexes[ii+1])
+            projViews.append(self.dataProjectionMat[fyuseId][lPoseData[indexes[ii+1]]]['P'])
+            distViews.append(self.dataProjectionMat[fyuseId][lPoseData[indexes[ii+1]]]['distortion'])
+
+        imgViews = np.vstack(imgViews)
+        projViews = np.vstack(projViews)
+        distViews = np.vstack(distViews)
 
         batchDict = {'ImgInput': imgInput,
+                     'ImgInputMsk': imgInputMsk,
                      'ImgViews': imgViews,
+                     'ProjViews': projViews,
+                     'DistViews':distViews
                     }
 
         return batchDict
@@ -93,17 +123,21 @@ class BatchLoader(Dataset):
         # im2[np.where(im < 1.)] = 0.
 
         # PIL does not have a 16bit read.. therefore all this conversion between numpy and PIL
-
-        Im = imageio.imread(imName)
-        Im2 = np.ones((1080,1920))
-        Im1 = img_as_float(Im)
-        Im2[np.where(Im1 < 1.)] = 0.
-        Im2 = (255-255*Im2).astype(np.uint8)
-        im = Image.fromarray(Im2, 'L')
-        imSq = Image.new('L', (1920,1920), (0)) ####Hardcoding
-        imSq.paste(im, (0,420)) ####Hardcoding
-        imSq = imSq.resize((256, 256), Image.ANTIALIAS)
-        im = np.asarray(imSq)        
+        # TODO : easier way to use OpenCV
+        try : 
+            Im = imageio.imread(imName)
+            Im2 = np.ones((1080,1920))
+            Im1 = img_as_float(Im)
+            Im2[np.where(Im1 < 1.)] = 0.
+            Im2 = (255-255*Im2).astype(np.uint8)
+            im = Image.fromarray(Im2, 'L')
+            imSq = Image.new('L', (1920,1920), (0)) ####Hardcoding
+            imSq.paste(im, (0,420)) ####Hardcoding
+            imSq = imSq.resize((self.imSize, self.imSize), Image.ANTIALIAS)
+            im = np.asarray(imSq).astype('float32')/255.0        
+        except :
+            print (imName)
+            raise
         return im
 
 
@@ -114,32 +148,47 @@ class BatchLoader(Dataset):
         return im
 
     def ParsePoses(self, dataRoot, fyuseId, views, pad=420):
+        # This is for the new format!!!
         scenemodel_path = os.path.join(dataRoot, 'Normalized/ScenemodelFiles', fyuseId+'_scenemodel_raw.json')
         assert os.path.exists(scenemodel_path), "Scenemodel {} not found!".format(scenemodel_path)
         with open(scenemodel_path, 'r') as f:
             poses = json.load(f)
-
         allPoses = {}
         viewIds = set([int(view.split('/')[-1].replace('depth','').split('.')[0]) for view in views])
         for frameNum, pose in enumerate(poses['trajectory']['measurements']):
             if frameNum not in viewIds:
                 continue
             transforms = {}
-            # k1, k2, p1, p2, k3
-            transforms['distortion'] = np.array(pose['anchor']['distortion'] + [0.])
+            try : 
+                # k1, k2, p1, p2, k3
+                transforms['distortion'] = np.array(pose['anchor']['camera']['intrinsics'][-4:] + [0.])
 
-            intrinsics = np.array(pose['anchor']['intrinsicsVector'])
-            K = [
-                [intrinsics[0], intrinsics[2], intrinsics[3]-0.5], [0, intrinsics[1], intrinsics[4] + pad - 0.5], [0, 0, 1]
-            ]
+                intrinsics = np.array(pose['anchor']['camera']['intrinsics'][:5])
+                K = [
+                    [intrinsics[0], intrinsics[2], intrinsics[3]+0.5], [0, intrinsics[1], intrinsics[4] + pad + 0.5], [0, 0, 1]
+                ]
 
-            K = np.array(K)
-            Rt = np.linalg.inv(np.array(pose['anchor']['transform']).reshape(4, 4))
-            transforms['P'] = np.matmul(K, Rt[0:3,:])
-            allPoses[frame_num] = transforms
+                K = np.array(K)
+                Rt = np.linalg.inv(np.array(pose['anchor']['transform']).reshape(4, 4))
+                transforms['P'] = np.matmul(K, Rt[0:3,:])
+            except : 
+                transforms = {}
+                # k1, k2, p1, p2, k3
+                transforms['distortion'] = np.array(pose['anchor']['distortion'] + [0.])
+
+                intrinsics = np.array(pose['anchor']['intrinsicsVector'])
+                K = [
+                    [intrinsics[0], intrinsics[2], intrinsics[3]-0.5], [0, intrinsics[1], intrinsics[4] + pad - 0.5], [0, 0, 1]
+                ]
+
+                K = np.array(K)
+                Rt = np.linalg.inv(np.array(pose['anchor']['transform']).reshape(4, 4))
+                transforms['P'] = np.matmul(K, Rt[0:3,:])
+
+            allPoses[frameNum] = transforms
         return allPoses
 
-    def LoadObjMesh(filename):
+    def LoadObjMesh(self, filename):
         vertices = []
         faces = []
         f = open(filename,'r')
@@ -160,3 +209,7 @@ class BatchLoader(Dataset):
         f.close()
         
         return vertices, faces
+
+    def SaveDebugBatch(self, filename):
+        # TODO : implement this
+        pass
