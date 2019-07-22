@@ -109,5 +109,6 @@ data/datasets
 
 examples/unsupervised_recon
 examples/recon
+CheckMeshGen/
 
 .DS_Store
