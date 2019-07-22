@@ -86,8 +86,8 @@ if opt.cuda:
 ####################################
 # Initial Optimizer
 scale = 1.0
-opEncoderInit = optim.Adam(encoderInit.parameters(), lr=1e-4 * scale, betas=(0.5, 0.999) )
-opDecoderInit = optim.Adam(decoderInit.parameters(), lr=1e-4 * scale, betas=(0.5, 0.999) )
+opEncoderInit = optim.Adam(encoderInit.parameters(), lr=1e-2 * scale, betas=(0.5, 0.999) )
+opDecoderInit = optim.Adam(decoderInit.parameters(), lr=1e-2 * scale, betas=(0.5, 0.999) )
 #####################################
 
 
@@ -168,7 +168,7 @@ for epoch in range(opt.nepoch):
 
             runningLoss += loss
 
-            print (runningLoss/(ii+1.))
+            #print (runningLoss/(ii+1.))
 
         epochLoss = runningLoss / dataLengths[phase]
         print('{} Loss: {:.4f}'.format(phase, epochLoss))

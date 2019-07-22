@@ -236,13 +236,34 @@ class BatchLoader(Dataset):
         for ii in range(numFrames) : 
             col = int(ii % 5)
             row = int(ii / 5)
-            print (imgViews[ii][0])
             globalImg[row*self.imSize:row*self.imSize + self.imSize,col*self.imSize:col*self.imSize + self.imSize] = (255*imgViews[ii][0]).astype(np.uint8)
 
         imageio.imsave(os.path.join(dataDir, fyuseId+'Views.png'), globalImg)
 
         # Now project vertices and see if they are in the field of view...
-        
+        templateVertex = np.concatenate([templateVertex, np.ones_like(templateVertex[ :, None, 0])], axis=-1)
+
+        for ii in range(numFrames) :            
+            projPoints = np.matmul(templateVertex, projViews[ii].transpose(1,0))
+            normProjPoints = projPoints[:,0:2] /  projPoints[:,2:3]
+
+            normProjPoints[:,0] = normProjPoints[:,0]*(256./ 1920)
+            normProjPoints[:,1] = normProjPoints[:,1]*(256./ 1920)
+
+            # print (np.max(normProjPoints,axis=0))
+            # print (np.min(normProjPoints,axis=0))
+            # print ('---------------')
+            
+            prjImg = np.zeros((256,256), dtype=np.uint8)
+            for jj in normProjPoints : 
+                yy = 255 if jj[0] > 255 else int(jj[0])
+                xx = 255 if jj[1] > 255 else int(jj[1])
+                #xx = 255 - xx
+                prjImg[xx,yy] = 255
+
+            imageio.imsave(os.path.join(dataDir, 'pred%05d.png'%ii), prjImg)
+            # imgGt = imageio.imread('GtRedRed/{0:09d}'.format(idx)+'.jpg').astype('uint8')
+            # imageio.imsave('Output/gt%05d.png'%ii,imgGt)
 
         print ("Saved Debug Batch!")
-        pass
+        
