@@ -8,7 +8,9 @@ def projection(vertices, P, dist_coeffs, orig_size):
     dist_coeffs: vector of distortion coefficients
     orig_size: original size of image captured by the camera
     '''
+    print (vertices.shape, P.shape)
     vertices = torch.cat([vertices, torch.ones_like(vertices[:, :, None, 0])], dim=-1)
+    print (vertices.shape, P.shape)
     vertices = torch.bmm(vertices, P.transpose(2,1))
     x, y, z = vertices[:, :, 0], vertices[:, :, 1], vertices[:, :, 2]
     x_ = x / (z + 1e-5)

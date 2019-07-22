@@ -3,14 +3,17 @@ import argparse
 import random
 import os
 import models
+import losses
 #import utils
 import DataLoader
 import torch.nn as nn
 import numpy as np
 import torch.optim as optim
 import torchvision.utils as vutils
+import soft_renderer as sr
 
 from torch.autograd import Variable
+
 #from torch.utils.data import DataLoader
 
 parser = argparse.ArgumentParser()
@@ -23,6 +26,7 @@ parser.add_argument('--batchSize', type=int, default=2, help='input batch size')
 parser.add_argument('--numViews', type=int, default=15, help='views for training')
 parser.add_argument('--validationSplit', type=float, default=0.1, help='data used for validation')
 parser.add_argument('--imageSize', type=int, default=256, help='the height / width of the input image to network')
+parser.add_argument('--origImageSize', type=int, default=1920, help='the height / width of the actual image')
 parser.add_argument('--pad', type=int, default=420, help='The amount of padding added at top and bottom of image')
 parser.add_argument('--cuda', action='store_true', help='enables cuda')
 parser.add_argument('--deviceIds', type=int, nargs='+', default=[0], help='the gpus used for training network')
@@ -89,7 +93,7 @@ opDecoderInit = optim.Adam(decoderInit.parameters(), lr=1e-4 * scale, betas=(0.5
 
 ####################################
 # Data Loaders..
-fyuseDataset = DataLoader.BatchLoader(opt.dataRoot, imSize=opt.imageSize, numViews=opt.numViews, padding=opt.pad)
+fyuseDataset = DataLoader.BatchLoader(opt.dataRoot, opt.batchSize, imSize=opt.imageSize, numViews=opt.numViews, padding=opt.pad)
 datasetSize = len(fyuseDataset)
 indices = list(range(datasetSize))
 np.random.shuffle(indices)
@@ -125,7 +129,7 @@ for epoch in range(opt.nepoch):
             encoderInit.train(False)  # Set model to evaluate mode
             decoderInit.train(False)
 
-        running_loss = 0.0
+        runningLoss = 0.0
 
         # Iterate over data.
         for ii, dataBatch in enumerate(dataLoaders[phase]):
@@ -136,14 +140,35 @@ for epoch in range(opt.nepoch):
             imgInput = dataBatch['ImgInput'].cuda()
             imgInputMsk = dataBatch['ImgInputMsk'].cuda()
             imgViews = dataBatch['ImgViews'].cuda()
-            projViews = dataBatch['ProjViews'].cuda()
-            distViews = dataBatch['DistViews'].cuda()
+            projViews = dataBatch['ProjViews'].reshape(opt.batchSize*opt.numViews,3,4).cuda()
+            distViews = dataBatch['DistViews'].reshape(opt.batchSize*opt.numViews,5).cuda()
+            templateVertex = dataBatch['TemplVertex'].cuda()
+            templateFaces =  dataBatch['TemplFaces'].cuda()
+
             imgMaskedInput = torch.cat([imgInput,imgInputMsk], dim=1)
             features = encoderInit(imgMaskedInput)
             outPos = decoderInit(features)
-            print (outPos.shape)
-            break
+            #print (outPos.shape)
+            meshM = models.MeshModel(templateFaces, templateVertex)
+            # TODO : calculate lap and flat loss here..
+            meshDeformed = meshM.forward(outPos[:,:-1,:], outPos[:,-1:,:], opt.numViews, opt.batchSize)
+            renderer = sr.SoftRenderer(image_size=opt.imageSize, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projViews, dist_coeffs=distViews, orig_size=opt.origImageSize)
+            imagesPred = renderer.render_mesh(meshDeformed)
+            
+            loss = losses.SilhouetteLoss(imagesPred[:, 3], imgViews.reshape(opt.batchSize*opt.numViews,opt.imageSize,opt.imageSize))
+            
+            # Train net..
+            opEncoderInit.zero_grad()
+            opDecoderInit.zero_grad()
 
+            if phase == 'train':                
+                loss.backward()
+                opEncoderInit.step()
+                opDecoderInit.step()
 
+            runningLoss += loss
 
+            print (runningLoss/(ii+1.))
 
+        epochLoss = runningLoss / dataLengths[phase]
+        print('{} Loss: {:.4f}'.format(phase, epochLoss))

@@ -10,11 +10,12 @@ from torch.utils.data import Dataset
 from skimage.util import img_as_float
 
 class BatchLoader(Dataset):
-    def __init__(self, dataRoot, imSize = 256, isRandom=True, padding=420, numViews=20, rseed = None):
+    def __init__(self, dataRoot, batchSize, imSize = 256, isRandom=True, padding=420, numViews=20, debugDir='CheckMeshGen', rseed = None):
         self.dataRoot = dataRoot
         self.imSize = imSize
         self.numViews = numViews
-
+        self.batchSize = batchSize 
+        self.numViews = numViews
         f = open(os.path.join(self.dataRoot,'fyuse_ids.txt'),'r')
         self.dataFyuseList = [ids.strip() for ids in f]
         f.close()
@@ -34,7 +35,7 @@ class BatchLoader(Dataset):
         # print (self.dataFyuseList)
         # print (self.dataViewMaskNames)
         # print (self.dataProjectionMat)
-            
+        self.SaveDebugBatch(debugDir)    
 
 
     def __len__(self):
@@ -70,9 +71,9 @@ class BatchLoader(Dataset):
             projViews.append(self.dataProjectionMat[fyuseId][lPoseData[indexes[ii+1]]]['P'])
             distViews.append(self.dataProjectionMat[fyuseId][lPoseData[indexes[ii+1]]]['distortion'])
 
-        imgViews = np.vstack(imgViews)
-        projViews = np.vstack(projViews)
-        distViews = np.vstack(distViews)
+        imgViews = np.stack(imgViews)
+        projViews = np.stack(projViews)
+        distViews = np.stack(distViews)
 
         batchDict = {'ImgInput': imgInput,
                      'ImgInputMsk': imgInputMsk,
@@ -173,7 +174,7 @@ class BatchLoader(Dataset):
 
                 K = np.array(K)
                 Rt = np.linalg.inv(np.array(pose['anchor']['transform']).reshape(4, 4))
-                transforms['P'] = np.matmul(K, Rt[0:3,:])
+                transforms['P'] = np.matmul(K, Rt[0:3,:]).astype('float32')
             except : 
                 transforms = {}
                 # k1, k2, p1, p2, k3
@@ -186,7 +187,7 @@ class BatchLoader(Dataset):
 
                 K = np.array(K)
                 Rt = np.linalg.inv(np.array(pose['anchor']['transform']).reshape(4, 4))
-                transforms['P'] = np.matmul(K, Rt[0:3,:])
+                transforms['P'] = np.matmul(K, Rt[0:3,:]).astype('float32')
 
             allPoses[frameNum] = transforms
         return allPoses
@@ -213,6 +214,35 @@ class BatchLoader(Dataset):
         
         return vertices, faces
 
-    def SaveDebugBatch(self, filename):
+    def SaveDebugBatch(self, dataDir):
         # TODO : implement this
+        dataBatch = self[2]
+
+        # First save all images... #Then project the mesh and save dots.. That will give a pretty good idea..
+        imgInput = dataBatch['ImgInput']
+        imgInputMsk = dataBatch['ImgInputMsk']
+        imgViews = dataBatch['ImgViews']
+        projViews = dataBatch['ProjViews']
+        distViews = dataBatch['DistViews']
+        templateVertex = dataBatch['TemplVertex']
+        templateFaces =  dataBatch['TemplFaces']
+
+        fyuseId = self.dataFyuseList[2]
+        numFrames = len(imgViews)
+        imageio.imsave(os.path.join(dataDir,fyuseId+'inputImg.jpg'), (imgInput*127.5+127.5).transpose(1,2,0).astype('uint8'))
+        imageio.imsave(os.path.join(dataDir,fyuseId+'inputImgMask.jpg'), (255*imgInputMsk[0,:,:]).astype('uint8'))
+        globalImg = 255 * np.zeros((self.imSize*int(numFrames/5 + 1),self.imSize*5), dtype=np.uint8)
+
+        for ii in range(numFrames) : 
+            col = int(ii % 5)
+            row = int(ii / 5)
+            print (imgViews[ii][0])
+            globalImg[row*self.imSize:row*self.imSize + self.imSize,col*self.imSize:col*self.imSize + self.imSize] = (255*imgViews[ii][0]).astype(np.uint8)
+
+        imageio.imsave(os.path.join(dataDir, fyuseId+'Views.png'), globalImg)
+
+        # Now project vertices and see if they are in the field of view...
+        
+
+        print ("Saved Debug Batch!")
         pass

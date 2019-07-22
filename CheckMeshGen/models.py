@@ -58,24 +58,32 @@ class Decoder(nn.Module):
         x3 = self.bn3(self.fc3(x2))
         return x3.reshape((-1,self.numVertices,3))
 
-class Model():
+class MeshModel():
     def __init__(self, faces, vertices):
         # set template mesh
         # Assuming faces, vertices are batch, num, 3
         # The mesh class they have is such that they work with multiple meshes.. 
         # So the vertices and faces here would be for multiple(batchNum) meshes
         self.template_mesh = sr.Mesh(vertices, faces)
-        self.register_buffer('vertices', self.template_mesh.vertices)
-        self.register_buffer('faces', self.template_mesh.faces)
+        self.vertices = self.template_mesh.vertices
+        self.faces = self.template_mesh.faces
+        #TODO : check if this works for multiple meshes..
+        #self.laplacian_loss = sr.LaplacianLoss(self.vertices.cpu(), self.faces.cpu())
+        #self.flatten_loss = sr.FlattenLoss(self.faces.cpu())
 
-    def forward(self, batch_size, center, displace, numViews):
+
+    def forward(self, displace, center, numViews, numBatch):
     	# center, displace would be batchx3, batchxnumvertx3
         base = torch.log(self.vertices.abs() / (1 - self.vertices.abs()))
         centroid = torch.tanh(center)
-        vertices = torch.sigmoid(base + self.displace) * torch.sign(self.vertices)
+        vertices = torch.sigmoid(base + displace) * torch.sign(self.vertices)
         # need to figure out this transformation
-        vertices = F.relu(vertices) * (1 - centroid[:, None, :]) - F.relu(-vertices) * (centroid[:,None, :] + 1)
+        vertices = F.relu(vertices) * (1 - centroid) - F.relu(-vertices) * (centroid + 1)
         vertices = vertices + centroid
 
-        return sr.Mesh(vertices.repeat(1, numViews, 1), self.faces.repeat(1, numViews, 1))
+        # apply Laplacian and flatten geometry constraints
+        #laplacian_loss = self.laplacian_loss(vertices).mean()
+        #flatten_loss = self.flatten_loss(vertices).mean()
+
+        return sr.Mesh(vertices.repeat(1, numViews, 1).reshape(numViews*numBatch, -1, 3), self.faces.repeat(1, numViews, 1).reshape(numViews*numBatch, -1, 3))
 

@@ -149,7 +149,7 @@ def main():
         print(projMatrices)
     
     projMatrices = projMatrices.cuda()
-    
+    print (projMatrices)
     renderer = sr.SoftRenderer(image_size=args.image_size, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projMatrices, dist_coeffs=distCoeffs, orig_size=args.orig_image_size)
     optimizer = torch.optim.Adam(model.parameters(), 0.001, betas=(0.5, 0.99))
 
