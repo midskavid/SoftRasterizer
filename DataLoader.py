@@ -78,7 +78,9 @@ class BatchLoader(Dataset):
                      'ImgInputMsk': imgInputMsk,
                      'ImgViews': imgViews,
                      'ProjViews': projViews,
-                     'DistViews':distViews
+                     'DistViews': distViews,
+                     'TemplVertex': self.templateVertex,
+                     'TemplFaces': self.templateFaces
                     }
 
         return batchDict

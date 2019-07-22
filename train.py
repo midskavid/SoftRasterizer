@@ -3,6 +3,7 @@ import argparse
 import random
 import os
 import models
+import losses
 #import utils
 import DataLoader
 import torch.nn as nn
@@ -23,6 +24,7 @@ parser.add_argument('--batchSize', type=int, default=2, help='input batch size')
 parser.add_argument('--numViews', type=int, default=15, help='views for training')
 parser.add_argument('--validationSplit', type=float, default=0.1, help='data used for validation')
 parser.add_argument('--imageSize', type=int, default=256, help='the height / width of the input image to network')
+parser.add_argument('--origImageSize', type=int, default=1920, help='the height / width of the actual image')
 parser.add_argument('--pad', type=int, default=420, help='The amount of padding added at top and bottom of image')
 parser.add_argument('--cuda', action='store_true', help='enables cuda')
 parser.add_argument('--deviceIds', type=int, nargs='+', default=[0], help='the gpus used for training network')
@@ -138,11 +140,20 @@ for epoch in range(opt.nepoch):
             imgViews = dataBatch['ImgViews'].cuda()
             projViews = dataBatch['ProjViews'].cuda()
             distViews = dataBatch['DistViews'].cuda()
+            templateVertex = dataBatch['TemplVertex'].cuda()
+            templateFaces =  dataBatch['TemplFaces'].cuda()
+
             imgMaskedInput = torch.cat([imgInput,imgInputMsk], dim=1)
             features = encoderInit(imgMaskedInput)
             outPos = decoderInit(features)
-            print (outPos.shape)
-            break
+            #print (outPos.shape)
+            meshM = MeshModel(templateFaces, templateVertex)
+            # TODO : calculate lap and flat loss here..
+            meshDeformed = meshM.forward(outPos[:,:-1,:], outPos[:,-1,:], opt.numViews)
+            renderer = sr.SoftRenderer(image_size=opt.imageSize, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projViews, dist_coeffs=distViews, orig_size=opt.origImageSize)
+            imagesPred = renderer.render_mesh(meshDeformed)
+            
+            
 
 
 
