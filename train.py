@@ -40,12 +40,15 @@ parser.add_argument('--lamF', type=float, default=1.0, help='weight Flatten loss
 
 opt = parser.parse_args()
 print(opt)
+torch.backends.cudnn.enabled = False
 
 opt.gpuId = opt.deviceIds[0]
 
 if opt.experiment is None:
     opt.experiment = 'CheckMeshGen'
-os.system('mkdir {0}'.format(opt.experiment) )
+os.system('mkdir {0}'.format(opt.experiment))
+#Clean Directory
+os.system('rm {0}/*'.format(opt.experiment))
 os.system('cp *.py %s' % opt.experiment )
 
 lamS = opt.lamS
@@ -108,7 +111,7 @@ trainSampler = torch.utils.data.SubsetRandomSampler(trainIndices)
 validSampler = torch.utils.data.SubsetRandomSampler(valIndices)
 
 # TODO : check the significance of shuffle here...
-trainLoader = torch.utils.data.DataLoader(fyuseDataset, batch_size=opt.batchSize, sampler=trainSampler, num_workers = 4, shuffle = False)
+trainLoader = torch.utils.data.DataLoader(fyuseDataset, batch_size=opt.batchSize, sampler=trainSampler, num_workers = 4, shuffle = False, drop_last=True) # sometimes the last batch is 1 size and batchnorm 1d fails...
 validationLoader = torch.utils.data.DataLoader(fyuseDataset, batch_size=1, sampler=validSampler, num_workers = 4, shuffle = False)
 dataLoaders = {"train": trainLoader, "val": validationLoader}
 dataLengths = {"train": len(trainLoader), "val": len(validationLoader)}
