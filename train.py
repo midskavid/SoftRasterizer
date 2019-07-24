@@ -39,7 +39,7 @@ parser.add_argument('--lamS', type=float, default=1.0, help='weight Silhouette')
 parser.add_argument('--lamC', type=float, default=1.0, help='weight Color')
 parser.add_argument('--lamL', type=float, default=1.0, help='weight Laplacian')
 parser.add_argument('--lamP', type=float, default=1.0, help='weight Pixel loss')
-parser.add_argument('--lamF', type=float, default=1.0, help='weight Flatten loss')
+parser.add_argument('--lamF', type=float, default=0.003, help='weight Flatten loss')
 
 opt = parser.parse_args()
 print(opt)
@@ -122,7 +122,7 @@ dataLengths = {"train": len(trainLoader), "val": len(validationLoader)}
 
 
 ######################################
-
+jj = 0
 
 for epoch in range(opt.nepoch):
     print('Epoch {}/{}'.format(epoch, opt.nepoch - 1))
@@ -167,19 +167,16 @@ for epoch in range(opt.nepoch):
             renderer = sr.SoftRenderer(image_size=opt.imageSize, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projViews, orig_size=opt.origImageSize)
             imagesPred = renderer.render_mesh(meshDeformed)
             SS = losses.SilhouetteLoss(imagesPred[:, 3], imgViews.reshape(currBatchSize*opt.numViews,opt.imageSize,opt.imageSize))
-            print (SS)
-            print (lapLoss)
-            print (fltLoss)
             loss = lamS*SS + \
                    lamL*lapLoss + \
-                   0.003*lamF*fltLoss
+                   lamF*fltLoss
             
             # Train net..
             opEncoderInit.zero_grad()
             opDecoderInit.zero_grad()
 
 
-            if ii % 1 == 0 and phase == 'train':
+            if jj % 10 == 0 and phase == 'train':
                 images = imagesPred.detach().cpu().numpy()
                 imagesGt = imgViews.detach().cpu().numpy().reshape(opt.batchSize*opt.numViews,opt.imageSize,opt.imageSize)
                 numFrames = 20 # Save only 20 frames..
@@ -203,13 +200,14 @@ for epoch in range(opt.nepoch):
                 loss.backward()
                 opDecoderInit.step()
                 opEncoderInit.step()
-            if phase == 'val' : 
+            if phase == 'val' and jj % 10: 
                 # Running val in batchsize 1..
                 meshM.forward(outPos[:,:-1,:], outPos[:,-1:,:], 1, 1)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_car.obj'), save_texture=False)
                 
             runningLoss += loss
             loop.set_description('Loss: %.4f'%(loss.item()))
             #print (runningLoss/(ii+1.))
+            jj += 1
 
         epochLoss = runningLoss / dataLengths[phase]
         print('{} Loss: {:.4f}'.format(phase, epochLoss))
