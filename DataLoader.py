@@ -10,13 +10,13 @@ from torch.utils.data import Dataset
 from skimage.util import img_as_float
 
 class BatchLoader(Dataset):
-    def __init__(self, dataRoot, batchSize, imSize = 256, isRandom=True, padding=420, numViews=20, debugDir='CheckMeshGen', rseed = None):
+    def __init__(self, dataRoot, fyuseName, batchSize, imSize = 256, isRandom=True, padding=420, numViews=20, debugDir='CheckMeshGen', rseed = None):
         self.dataRoot = dataRoot
         self.imSize = imSize
         self.numViews = numViews
         self.batchSize = batchSize 
         self.numViews = numViews
-        f = open(os.path.join(self.dataRoot,'fyuse_ids.txt'),'r')
+        f = open(os.path.join(self.dataRoot,fyuseName),'r')
         self.dataFyuseList = [ids.strip() for ids in f]
         f.close()
         random.shuffle(self.dataFyuseList) # Permute..

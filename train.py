@@ -5,6 +5,7 @@ import os
 import models
 import losses
 import tqdm
+import imageio
 #import utils
 import DataLoader
 import torch.nn as nn
@@ -21,8 +22,10 @@ parser = argparse.ArgumentParser()
 # The locationi of training set
 parser.add_argument('--dataRoot', default='/media/intelssd/akar/mesh_seg_dataset/', help='path to Dataset Root')
 parser.add_argument('--experiment', default=None, help='the path to store samples and models')
+parser.add_argument('--fyuses', default='fyuse_ids.txt', help='the path to fyuseIds')
+parser.add_argument('--scale', type=float, default=1.0, help='learning rate scaling')
 # The basic training setting
-parser.add_argument('--nepoch', type=int, default=100, help='the number of epochs for training')
+parser.add_argument('--nepoch', type=int, default=200, help='the number of epochs for training')
 parser.add_argument('--batchSize', type=int, default=2, help='input batch size')
 parser.add_argument('--numViews', type=int, default=15, help='views for training')
 parser.add_argument('--validationSplit', type=float, default=0.1, help='data used for validation')
@@ -90,7 +93,7 @@ if opt.cuda:
 
 ####################################
 # Initial Optimizer
-scale = 1.0
+scale = opt.scale
 opEncoderInit = optim.Adam(encoderInit.parameters(), lr=1e-2 * scale, betas=(0.5, 0.999) )
 opDecoderInit = optim.Adam(decoderInit.parameters(), lr=1e-2 * scale, betas=(0.5, 0.999) )
 #####################################
@@ -98,7 +101,7 @@ opDecoderInit = optim.Adam(decoderInit.parameters(), lr=1e-2 * scale, betas=(0.5
 
 ####################################
 # Data Loaders..
-fyuseDataset = DataLoader.BatchLoader(opt.dataRoot, opt.batchSize, imSize=opt.imageSize, numViews=opt.numViews, padding=opt.pad)
+fyuseDataset = DataLoader.BatchLoader(opt.dataRoot, opt.fyuses, opt.batchSize, imSize=opt.imageSize, numViews=opt.numViews, padding=opt.pad, debugDir=opt.experiment)
 datasetSize = len(fyuseDataset)
 indices = list(range(datasetSize))
 np.random.shuffle(indices)
@@ -160,17 +163,41 @@ for epoch in range(opt.nepoch):
             #print (outPos.shape)
             meshM = models.MeshModel(templateFaces, templateVertex).cuda(opt.gpuId)
             # TODO : calculate lap and flat loss here..
-            meshDeformed, lapLoss, fltLoss = meshM.forward(outPos[:,:-1,:], outPos[:,-1:,:], opt.numViews, currBatchSize)
+            meshDeformed, lapLoss, fltLoss = meshM.forward(outPos[:,:-1,:], torch.zeros_like(outPos[:,-1:,:]).cuda(), opt.numViews, currBatchSize)
             renderer = sr.SoftRenderer(image_size=opt.imageSize, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projViews, orig_size=opt.origImageSize)
             imagesPred = renderer.render_mesh(meshDeformed)
-            
-            loss = lamS*losses.SilhouetteLoss(imagesPred[:, 3], imgViews.reshape(currBatchSize*opt.numViews,opt.imageSize,opt.imageSize)) + \
+            SS = losses.SilhouetteLoss(imagesPred[:, 3], imgViews.reshape(currBatchSize*opt.numViews,opt.imageSize,opt.imageSize))
+            print (SS)
+            print (lapLoss)
+            print (fltLoss)
+            loss = lamS*SS + \
                    lamL*lapLoss + \
-                   lamF*fltLoss
+                   0.003*lamF*fltLoss
             
             # Train net..
             opEncoderInit.zero_grad()
             opDecoderInit.zero_grad()
+
+
+            if ii % 1 == 0 and phase == 'train':
+                images = imagesPred.detach().cpu().numpy()
+                imagesGt = imgViews.detach().cpu().numpy().reshape(opt.batchSize*opt.numViews,opt.imageSize,opt.imageSize)
+                numFrames = 20 # Save only 20 frames..
+                globalImg = 255 * np.ones((opt.imageSize*int(numFrames/10 + 1),opt.imageSize*10), dtype=np.uint8)
+                globalImgGt = np.zeros((opt.imageSize*int(numFrames/10 + 1),opt.imageSize*10), dtype=np.uint8)
+                for i in range(numFrames) : 
+                    col = int(i % 10)
+                    row = int(i / 10)
+                    image = images[i].transpose((1,2,0))
+                    globalImg[row*opt.imageSize:row*opt.imageSize + opt.imageSize,col*opt.imageSize:col*opt.imageSize + opt.imageSize] = (255 - 255*image[...,-1]).astype(np.uint8)
+                    globalImgGt[row*opt.imageSize:row*opt.imageSize + opt.imageSize,col*opt.imageSize:col*opt.imageSize + opt.imageSize] = (127.5*imagesGt[i]).astype(np.uint8)
+
+                
+                imageio.imsave(os.path.join(opt.experiment, fyuseId[0]+'_deform_%05d.png'%ii), globalImg+globalImgGt)
+
+                # save optimized mesh
+                imageio.imsave(os.path.join(opt.experiment, fyuseId[0]+'_groundT_%05d.png'%ii), globalImgGt)
+
 
             if phase == 'train':                
                 loss.backward()
