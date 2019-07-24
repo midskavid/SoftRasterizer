@@ -52,8 +52,8 @@ class BatchLoader(Dataset):
             print (fyuseId)
             raise
         # Load input image from JPEG images.. pad image accordingly : 
-        frame = self.dataViewMaskNames[fyuseId][indexes[0]].split('/')[-1].replace('depth','').replace('.png','.jpg')
-        imgInput = self.LoadImage(os.path.join(self.dataRoot, 'JPEGImages', fyuseId+'_'+frame))
+        frame = self.dataViewMaskNames[fyuseId][indexes[0]].split('/')[-1].replace('depth','').replace('0','',1)
+        imgInput = self.LoadImage(os.path.join(self.dataRoot, 'Fyuses', fyuseId,'unstabilized','stabilized_'+frame))
         # read the corresponding mask...
         imgInputMsk = self.LoadMaskFromDepth(self.dataViewMaskNames[fyuseId][indexes[0]])
 
@@ -75,7 +75,8 @@ class BatchLoader(Dataset):
         projViews = np.stack(projViews)
         distViews = np.stack(distViews)
 
-        batchDict = {'ImgInput': imgInput,
+        batchDict = {'fyuseId': fyuseId, 
+                     'ImgInput': imgInput,
                      'ImgInputMsk': imgInputMsk,
                      'ImgViews': imgViews,
                      'ProjViews': projViews,
@@ -190,6 +191,7 @@ class BatchLoader(Dataset):
                 transforms['P'] = np.matmul(K, Rt[0:3,:]).astype('float32')
 
             allPoses[frameNum] = transforms
+
         return allPoses
 
     def LoadObjMesh(self, filename):

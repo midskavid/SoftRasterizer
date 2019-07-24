@@ -18,14 +18,14 @@ current_dir = os.path.dirname(os.path.realpath(__file__))
 
 class PoseReader():
     def __init__(self, fyuse_dir, scale_from_full_hd=1.0):
-        scenemodel_path = os.path.join(fyuse_dir, "scenemodel_raw_refined.json")
+        scenemodel_path = os.path.join(fyuse_dir, "scenemodel_raw.json")
         assert os.path.exists(scenemodel_path), "Scenemodel {} not found!".format(scenemodel_path)
         with open(scenemodel_path, 'r') as f:
             poses = json.load(f)
         # crops_path = os.path.join(root_dir, fyuse_id, "Crops")
-        jpg_ids = set([int(x.split("/")[-1].split(".")[0]) for x in glob.glob(fyuse_dir + "GtRedRed/*.jpg")])
+        jpg_ids = set([int(x.split("/")[-1].split(".")[0]) for x in glob.glob(fyuse_dir + "NewGt/*.jpg")])
         if len(jpg_ids) == 0 : 
-            jpg_ids = set([int(x.split("/")[-1].split(".")[0]) for x in glob.glob(fyuse_dir + "GtRedRed/*.png")])
+            jpg_ids = set([int(x.split("/")[-1].split(".")[0]) for x in glob.glob(fyuse_dir + "NewGt/*.png")])
         # Make a data structure that has a dictionary with distortion matrix, intrinsics and [R|t] that is looked
         # up by frame id
         self.poses = {}
@@ -38,9 +38,9 @@ class PoseReader():
 
             # Distortion is [k1, k2, p1, p2, k3] reference:
             # https://docs.opencv.org/2.4/modules/calib3d/doc/camera_calibration_and_3d_reconstruction.html
-            transforms['distortion'] = torch.Tensor(pose['anchor']['distortion'] + [0.])
+            transforms['distortion'] = torch.Tensor(pose['anchor']['camera']['intrinsics'][-4:] + [0.])
 
-            intrinsics = torch.Tensor(pose['anchor']['intrinsicsVector'])
+            intrinsics = torch.Tensor(pose['anchor']['camera']['intrinsics'][:5])
             K = [
                 [intrinsics[0], intrinsics[2], intrinsics[3]-0.5], [0, intrinsics[1], intrinsics[4] + 420-0.5], [0, 0, 1]
             ]
@@ -132,12 +132,12 @@ def main():
         idx = lPoseData[ii]
         projMat = torch.mm(poseData.poses[idx]['K'],poseData.poses[idx]['Rt'][0:3,:])
         try :
-            imgGt = imageio.imread(args.data_dir+'GtRedRed/{0:08d}'.format(idx)+'.png').astype('float32') / 255.0
+            imgGt = imageio.imread(args.data_dir+'NewGt/{0:05d}'.format(idx)+'.png').astype('float32') / 255.0
         except :
             try :
-                imgGt = imageio.imread(args.data_dir+'GtRedRed/{0:09d}'.format(idx)+'.jpg').astype('float32') / 255.0
-            except e:
-                raise(e)
+                imgGt = imageio.imread(args.data_dir+'NewGt/{0:05d}'.format(idx)+'.jpg').astype('float32') / 255.0
+            except :
+                raise
         imagesGT.append(imgGt)
         projMatrices.append(projMat)
         distCoeffs.append(poseData.poses[idx]['distortion'])
@@ -149,8 +149,9 @@ def main():
         print(projMatrices)
     
     projMatrices = projMatrices.cuda()
+    distCoeffs = distCoeffs.cuda()
     #print (projMatrices)
-    renderer = sr.SoftRenderer(image_size=args.image_size, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projMatrices, dist_coeffs=distCoeffs, orig_size=args.orig_image_size)
+    renderer = sr.SoftRenderer(image_size=args.image_size, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projMatrices, orig_size=args.orig_image_size)
     optimizer = torch.optim.Adam(model.parameters(), 0.001, betas=(0.5, 0.99))
 
 
@@ -174,7 +175,7 @@ def main():
 
         # optimize mesh with silhouette reprojection error and geometry constraints
  
-        loss = SilhouetteLoss(images_pred[:, 3], images_gt) + 0.3 * laplacian_loss + 0.0003 * flatten_loss 
+        loss = SilhouetteLoss(images_pred[:, 3], images_gt) + 0.03 * laplacian_loss + 0.0003 * flatten_loss 
         loop.set_description('Loss: %.4f'%(loss.item()))
 
         optimizer.zero_grad()
@@ -185,7 +186,7 @@ def main():
             globalImgGt = np.zeros((args.image_size*int(numFrames/10 + 1),args.image_size*10), dtype=np.uint8)
 
         
-        if i % 1 == 0:
+        if i % 100 == 0:
             images = images_pred.detach().cpu().numpy()
             globalImg = 255 * np.ones((args.image_size*int(numFrames/10 + 1),args.image_size*10), dtype=np.uint8)
 

@@ -4,6 +4,7 @@ import random
 import os
 import models
 import losses
+import tqdm
 #import utils
 import DataLoader
 import torch.nn as nn
@@ -35,7 +36,7 @@ parser.add_argument('--lamS', type=float, default=1.0, help='weight Silhouette')
 parser.add_argument('--lamC', type=float, default=1.0, help='weight Color')
 parser.add_argument('--lamL', type=float, default=1.0, help='weight Laplacian')
 parser.add_argument('--lamP', type=float, default=1.0, help='weight Pixel loss')
-
+parser.add_argument('--lamF', type=float, default=1.0, help='weight Flatten loss')
 
 opt = parser.parse_args()
 print(opt)
@@ -51,6 +52,7 @@ lamS = opt.lamS
 lamC = opt.lamC
 lamL = opt.lamL
 lamP = opt.lamP
+lamF = opt.lamF
 
 opt.seed = 0
 print("Random Seed: ", opt.seed)
@@ -68,8 +70,8 @@ imInputMaskBatch = Variable(torch.FloatTensor(opt.batchSize, 1, opt.imageSize, o
 
 
 # initialize models
-encoderInit = nn.DataParallel(models.Encoder(), device_ids = opt.deviceIds)
-decoderInit = nn.DataParallel(models.Decoder(numVertices=642+1), device_ids = opt.deviceIds) # Center to be predicted too
+encoderInit = nn.DataParallel(models.Encoder(), device_ids=opt.deviceIds)
+decoderInit = nn.DataParallel(models.Decoder(numVertices=642+1), device_ids=opt.deviceIds) # Center to be predicted too
 
 
 ##############  ######################
@@ -106,8 +108,8 @@ trainSampler = torch.utils.data.SubsetRandomSampler(trainIndices)
 validSampler = torch.utils.data.SubsetRandomSampler(valIndices)
 
 # TODO : check the significance of shuffle here...
-trainLoader = torch.utils.data.DataLoader(fyuseDataset, batch_size=opt.batchSize, sampler=trainSampler, num_workers = 8, shuffle = False)
-validationLoader = torch.utils.data.DataLoader(fyuseDataset, batch_size=opt.batchSize, sampler=validSampler, num_workers = 8, shuffle = False)
+trainLoader = torch.utils.data.DataLoader(fyuseDataset, batch_size=opt.batchSize, sampler=trainSampler, num_workers = 4, shuffle = False)
+validationLoader = torch.utils.data.DataLoader(fyuseDataset, batch_size=1, sampler=validSampler, num_workers = 4, shuffle = False)
 dataLoaders = {"train": trainLoader, "val": validationLoader}
 dataLengths = {"train": len(trainLoader), "val": len(validationLoader)}
 ######################################
@@ -118,10 +120,10 @@ dataLengths = {"train": len(trainLoader), "val": len(validationLoader)}
 
 for epoch in range(opt.nepoch):
     print('Epoch {}/{}'.format(epoch, opt.nepoch - 1))
-    print('-' * 10)
+    print ('===============================')
 
     # Each epoch has a training and validation phase
-    for phase in ['train', 'val']:
+    for phase in ['train', 'val'] : #['val', 'train'] ['train', 'val']
         if phase == 'train':
             encoderInit.train(True)  # Set model to training mode
             decoderInit.train(True)
@@ -130,32 +132,38 @@ for epoch in range(opt.nepoch):
             decoderInit.train(False)
 
         runningLoss = 0.0
+        loop = tqdm.tqdm(list(range(dataLengths[phase])), ascii=True)
 
         # Iterate over data.
-        for ii, dataBatch in enumerate(dataLoaders[phase]):
+        for ii, dataBatch in zip(loop,dataLoaders[phase]):
             # Dataloader would return me Projection matrices and the input images and ground truth images. 
             # The manner in which dataloader creates batch, I will have to reshape them to have batch = batch*numViews
             # For mesh vertices and faces, I will get the correct format batchxnumVertx3.
             # This will be changed to the appropriate format with the forward of the dataloader.
-            imgInput = dataBatch['ImgInput'].cuda()
-            imgInputMsk = dataBatch['ImgInputMsk'].cuda()
-            imgViews = dataBatch['ImgViews'].cuda()
-            projViews = dataBatch['ProjViews'].reshape(opt.batchSize*opt.numViews,3,4).cuda()
-            distViews = dataBatch['DistViews'].reshape(opt.batchSize*opt.numViews,5).cuda()
-            templateVertex = dataBatch['TemplVertex'].cuda()
-            templateFaces =  dataBatch['TemplFaces'].cuda()
+            currBatchSize = len(dataBatch['ImgInput'])
+
+            fyuseId = dataBatch['fyuseId']
+            imgInput = dataBatch['ImgInput'].cuda(opt.gpuId)
+            imgInputMsk = dataBatch['ImgInputMsk'].cuda(opt.gpuId)
+            imgViews = dataBatch['ImgViews'].cuda(opt.gpuId)
+            projViews = dataBatch['ProjViews'].reshape(currBatchSize*opt.numViews,3,4).cuda(opt.gpuId)
+            distViews = dataBatch['DistViews'].reshape(currBatchSize*opt.numViews,5).cuda(opt.gpuId)
+            templateVertex = dataBatch['TemplVertex'].cuda(opt.gpuId)
+            templateFaces =  dataBatch['TemplFaces'].cuda(opt.gpuId)
 
             imgMaskedInput = torch.cat([imgInput,imgInputMsk], dim=1)
             features = encoderInit(imgMaskedInput)
             outPos = decoderInit(features)
             #print (outPos.shape)
-            meshM = models.MeshModel(templateFaces, templateVertex)
+            meshM = models.MeshModel(templateFaces, templateVertex).cuda(opt.gpuId)
             # TODO : calculate lap and flat loss here..
-            meshDeformed = meshM.forward(outPos[:,:-1,:], outPos[:,-1:,:], opt.numViews, opt.batchSize)
-            renderer = sr.SoftRenderer(image_size=opt.imageSize, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projViews, dist_coeffs=distViews, orig_size=opt.origImageSize)
+            meshDeformed, lapLoss, fltLoss = meshM.forward(outPos[:,:-1,:], outPos[:,-1:,:], opt.numViews, currBatchSize)
+            renderer = sr.SoftRenderer(image_size=opt.imageSize, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projViews, orig_size=opt.origImageSize)
             imagesPred = renderer.render_mesh(meshDeformed)
             
-            loss = losses.SilhouetteLoss(imagesPred[:, 3], imgViews.reshape(opt.batchSize*opt.numViews,opt.imageSize,opt.imageSize))
+            loss = lamS*losses.SilhouetteLoss(imagesPred[:, 3], imgViews.reshape(currBatchSize*opt.numViews,opt.imageSize,opt.imageSize)) + \
+                   lamL*lapLoss + \
+                   lamF*fltLoss
             
             # Train net..
             opEncoderInit.zero_grad()
@@ -163,12 +171,16 @@ for epoch in range(opt.nepoch):
 
             if phase == 'train':                
                 loss.backward()
-                opEncoderInit.step()
                 opDecoderInit.step()
-
+                opEncoderInit.step()
+            if phase == 'val' : 
+                # Running val in batchsize 1..
+                meshM.forward(outPos[:,:-1,:], outPos[:,-1:,:], 1, 1)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_car.obj'), save_texture=False)
+                
             runningLoss += loss
-
+            loop.set_description('Loss: %.4f'%(loss.item()))
             #print (runningLoss/(ii+1.))
 
         epochLoss = runningLoss / dataLengths[phase]
         print('{} Loss: {:.4f}'.format(phase, epochLoss))
+    print ('===============================\n\n')

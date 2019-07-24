@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 import numpy as np
 import soft_renderer as sr
+import losses
 
 class Encoder(nn.Module):
     def __init__(self):
@@ -58,8 +59,9 @@ class Decoder(nn.Module):
         x3 = self.bn3(self.fc3(x2))
         return x3.reshape((-1,self.numVertices,3))
 
-class MeshModel():
+class MeshModel(nn.Module):
     def __init__(self, faces, vertices):
+        super(MeshModel, self).__init__()
         # set template mesh
         # Assuming faces, vertices are batch, num, 3
         # The mesh class they have is such that they work with multiple meshes.. 
@@ -68,8 +70,9 @@ class MeshModel():
         self.vertices = self.template_mesh.vertices
         self.faces = self.template_mesh.faces
         #TODO : check if this works for multiple meshes..
-        #self.laplacian_loss = sr.LaplacianLoss(self.vertices.cpu(), self.faces.cpu())
-        #self.flatten_loss = sr.FlattenLoss(self.faces.cpu())
+        # Mesh connectivitiy is same!!!
+        self.laplacian_loss = losses.LaplacianLoss(self.vertices[0].cpu(), self.faces[0].cpu())
+        self.flatten_loss = losses.FlattenLoss(self.faces[0].cpu())
 
 
     def forward(self, displace, center, numViews, numBatch):
@@ -82,8 +85,8 @@ class MeshModel():
         vertices = vertices + centroid
 
         # apply Laplacian and flatten geometry constraints
-        #laplacian_loss = self.laplacian_loss(vertices).mean()
-        #flatten_loss = self.flatten_loss(vertices).mean()
+        laplacian_loss = self.laplacian_loss(vertices).mean()
+        flatten_loss = self.flatten_loss(vertices).mean()
 
-        return sr.Mesh(vertices.repeat(1, numViews, 1).reshape(numViews*numBatch, -1, 3), self.faces.repeat(1, numViews, 1).reshape(numViews*numBatch, -1, 3))
+        return sr.Mesh(vertices.repeat(1, numViews, 1).reshape(numViews*numBatch, -1, 3), self.faces.repeat(1, numViews, 1).reshape(numViews*numBatch, -1, 3)), laplacian_loss, flatten_loss
 
