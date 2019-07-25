@@ -43,7 +43,7 @@ parser.add_argument('--lamF', type=float, default=0.003, help='weight Flatten lo
 
 opt = parser.parse_args()
 print(opt)
-torch.backends.cudnn.enabled = False
+#torch.backends.cudnn.enabled = False
 
 opt.gpuId = opt.deviceIds[0]
 
