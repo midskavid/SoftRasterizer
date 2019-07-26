@@ -199,10 +199,11 @@ for epoch in range(opt.nepoch):
                 loss.backward()
                 opDecoderInit.step()
                 opEncoderInit.step()
-            if phase == 'val' and jj % 10: 
+            if phase == 'val' and (jj % 10 == 0): 
                 # Running val in batchsize 1..
-                meshM.forward(outPos[:,:-1,:], outPos[:,-1:,:], 1, 1)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_car.obj'), save_texture=False)
-                
+                meshM.forward(outPos[:,:-1,:], outPos[:,-1:,:], 1, 1)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_val_car.obj'), save_texture=False)
+            elif phase == 'train' and (jj % 100 == 0):
+                meshM.forward(outPos[0,:-1,:], outPos[0,-1:,:], 1, 1)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_train_car.obj'), save_texture=False)
             runningLoss += loss
             loop.set_description('Loss: %.4f'%(loss.item()))
             #print (runningLoss/(ii+1.))
