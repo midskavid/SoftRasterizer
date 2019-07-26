@@ -11,7 +11,6 @@ import DataLoader
 import torch.nn as nn
 import numpy as np
 import torch.optim as optim
-import torchvision.utils as vutils
 import soft_renderer as sr
 
 from torch.autograd import Variable
