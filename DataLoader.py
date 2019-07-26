@@ -61,15 +61,12 @@ class BatchLoader(Dataset):
         imgViews = []
         projViews = []
         distViews = []
-        lPoseData = list(self.dataProjectionMat[fyuseId])
+
         for ii in range(self.numViews): 
-            #frame = int(self.dataViewMaskNames[fyuseId][indexes[0]].split('/')[-1].replace('depth','').replace('.png',''))
+            frameIndx = int(self.dataViewMaskNames[fyuseId][indexes[ii+1]].split('/')[-1].replace('depth','').replace('.png',''))
             imgViews.append(self.LoadMaskFromDepth(self.dataViewMaskNames[fyuseId][indexes[ii+1]]))
-            # print (fyuseId)
-            # print (lPoseData[indexes[ii]])
-            # print (self.dataProjectionMat[fyuseId], indexes[ii+1])
-            projViews.append(self.dataProjectionMat[fyuseId][lPoseData[indexes[ii+1]]]['P'])
-            distViews.append(self.dataProjectionMat[fyuseId][lPoseData[indexes[ii+1]]]['distortion'])
+            projViews.append(self.dataProjectionMat[fyuseId][frameIndx]['P'])
+            distViews.append(self.dataProjectionMat[fyuseId][frameIndx]['distortion'])
 
         imgViews = np.stack(imgViews)
         projViews = np.stack(projViews)
