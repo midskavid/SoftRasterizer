@@ -156,8 +156,8 @@ for epoch in range(opt.nepoch):
             templateVertex = dataBatch['TemplVertex'].cuda(opt.gpuId)
             templateFaces =  dataBatch['TemplFaces'].cuda(opt.gpuId)
 
-            imgMaskedInput = torch.cat([imgInput,imgInputMsk], dim=1)
-            features = encoderInit(imgMaskedInput)
+            #imgMaskedInput = torch.cat([imgInput,imgInputMsk], dim=1)
+            features = encoderInit(imgInput)
             outPos = decoderInit(features)
             #print (outPos.shape)
             meshM = models.MeshModel(templateFaces, templateVertex).cuda(opt.gpuId)

@@ -10,7 +10,7 @@ class Encoder(nn.Module):
     def __init__(self):
         super(Encoder, self).__init__()
         # RGB image and a mask...
-        self.conv1 = nn.Conv2d(in_channels=4, out_channels=64, kernel_size=5, stride=2, padding=2, bias=False)
+        self.conv1 = nn.Conv2d(in_channels=3, out_channels=64, kernel_size=5, stride=2, padding=2, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
         self.conv2 = nn.Conv2d(in_channels=64, out_channels=128, kernel_size=4, stride=2, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(128)
