@@ -196,6 +196,7 @@ for epoch in range(opt.nepoch):
                 # save optimized mesh
                 imageio.imsave(os.path.join(opt.experiment, fyuseId[0]+'_groundT_%05d.png'%ii), globalImgGt)
                 # save to tensorboard!!
+                writer.add_image("Deformed and Ground Truth", globalImg+globalImgGt, global_step=jj, dataformats='HW')
             writer.add_scalar(tag=phase, scalar_value=loss.item(), global_step=jj)
 
             if phase == 'train':                
