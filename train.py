@@ -14,6 +14,7 @@ import torch.optim as optim
 import soft_renderer as sr
 
 from torch.autograd import Variable
+from torch.utils.tensorboard import SummaryWriter
 
 #from torch.utils.data import DataLoader
 
@@ -122,6 +123,7 @@ dataLengths = {"train": len(trainLoader), "val": len(validationLoader)}
 
 ######################################
 jj = 0
+writer = SummaryWriter(log_dir=opt.experiment)
 
 for epoch in range(opt.nepoch):
     print('Epoch {}/{}'.format(epoch, opt.nepoch - 1))
@@ -193,7 +195,8 @@ for epoch in range(opt.nepoch):
 
                 # save optimized mesh
                 imageio.imsave(os.path.join(opt.experiment, fyuseId[0]+'_groundT_%05d.png'%ii), globalImgGt)
-
+                # save to tensorboard!!
+            writer.add_scalar(tag=phase, scalar_value=loss.item(), global_step=jj)
 
             if phase == 'train':                
                 loss.backward()
@@ -201,9 +204,9 @@ for epoch in range(opt.nepoch):
                 opEncoderInit.step()
             if phase == 'val' and (jj % 10 == 0): 
                 # Running val in batchsize 1..
-                meshM.forward(outPos[:,:-1,:], outPos[:,-1:,:], 1, 1)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_val_car.obj'), save_texture=False)
+                meshM.forward(outPos[:,:-1,:], torch.zeros_like(outPos[:,-1:,:]).cuda(), 1, 1)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_val_car.obj'), save_texture=False)
             elif phase == 'train' and (jj % 100 == 0):
-                meshM.forward(outPos[0,:-1,:], outPos[0,-1:,:], 1, 1)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_train_car.obj'), save_texture=False)
+                meshM.forward(outPos[0,:-1,:], torch.zeros_like(outPos[0,-1:,:]).cuda(), 1, 1)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_train_car.obj'), save_texture=False)
             runningLoss += loss
             loop.set_description('Loss: %.4f'%(loss.item()))
             #print (runningLoss/(ii+1.))
@@ -211,4 +214,5 @@ for epoch in range(opt.nepoch):
 
         epochLoss = runningLoss / dataLengths[phase]
         print('{} Loss: {:.4f}'.format(phase, epochLoss))
+        
     print ('===============================\n\n')
