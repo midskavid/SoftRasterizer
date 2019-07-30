@@ -172,7 +172,7 @@ for epoch in range(opt.nepoch):
             meshDeformed, lapLoss, fltLoss = meshM.forward(outPos[:,:-1,:], torch.zeros_like(outPos[:,-1:,:]).cuda(), opt.numViews, currBatchSize, outCols)
             renderer = sr.SoftRenderer(image_size=opt.imageSize, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projViews, orig_size=opt.origImageSize)
             imagesPred = renderer.render_mesh(meshDeformed)
-
+            
             SS = losses.SilhouetteLoss(imagesPred[:, 3], imgViews)
             pixelL = pixelLoss(imagesPred[:,0:3,:,:]*(imgViews.unsqueeze(1)), (colImgViews/255.0)*(imgViews.unsqueeze(1)))
             
@@ -208,7 +208,7 @@ for epoch in range(opt.nepoch):
                 imageio.imsave(os.path.join(opt.experiment, fyuseId[0]+'_deform_%05d.png'%ii), globalImg+globalImgGt)
                 imageio.imsave(os.path.join(opt.experiment, fyuseId[0]+'_groundT_%05d.png'%ii), globalImgGt)
                 imageio.imsave(os.path.join(opt.experiment, fyuseId[0]+'_groundTCol_%05d.jpg'%ii), globalColViewsGt.astype(np.uint8).transpose(1,2,0))
-                imageio.imsave(os.path.join(opt.experiment, fyuseId[0]+'_DeformCol_%05d.jpg'%ii), globalColViews.astype(np.uint8).transpose(1,2,0))
+                imageio.imsave(os.path.join(opt.experiment, fyuseId[0]+'_DeformCol_%05d.jpg'%ii), (255*globalColViews).astype(np.uint8).transpose(1,2,0))
                 # save to tensorboard!!
                 writer.add_image("Deformed and Ground Truth", globalImg+globalImgGt, global_step=jj, dataformats='HW')
             writer.add_scalar(tag=phase, scalar_value=loss.item(), global_step=jj)
