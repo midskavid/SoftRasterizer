@@ -58,6 +58,24 @@ class Decoder(nn.Module):
         x3 = self.fc3(x2)
         return x3.reshape((-1,self.numVertices,3))
 
+
+
+class Color(nn.Module) : 
+    def __init__(self, numVertices=642):
+        super(Color, self).__init__()
+        self.numVertices = numVertices
+        self.fc1 = nn.Linear(512, 1024, bias=False)
+        self.bn1 = nn.BatchNorm1d(1024)
+        self.ac1 = nn.LeakyReLU()
+        self.fc2 = nn.Linear(1024, numVertices*3)
+    
+    def forward(self, x) :
+        x1 = self.ac1(self.bn1(self.fc1(x)))
+        x2 = torch.sigmoid(self.fc2(x1)) # map colors to [0,1]
+        return x2.reshape((-1,self.numVertices,3)) 
+
+
+
 class MeshModel(nn.Module):
     def __init__(self, faces, vertices):
         super(MeshModel, self).__init__()
@@ -74,7 +92,7 @@ class MeshModel(nn.Module):
         self.flatten_loss = losses.FlattenLoss(self.faces[0].cpu())
 
 
-    def forward(self, displace, center, numViews, numBatch):
+    def forward(self, displace, center, numViews, numBatch, texture):
     	# center, displace would be batchx3, batchxnumvertx3
 
         #vertices = self.vertices + displace + center
@@ -90,5 +108,5 @@ class MeshModel(nn.Module):
         laplacian_loss = self.laplacian_loss(vertices).mean()
         flatten_loss = self.flatten_loss(vertices).mean()
 
-        return sr.Mesh(vertices.repeat(1, numViews, 1).reshape(numViews*numBatch, -1, 3), self.faces.repeat(1, numViews, 1).reshape(numViews*numBatch, -1, 3)), laplacian_loss, flatten_loss
+        return sr.Mesh(vertices.repeat(1, numViews, 1).reshape(numViews*numBatch, -1, 3), self.faces.repeat(1, numViews, 1).reshape(numViews*numBatch, -1, 3), textures=texture.repeat(1, numViews, 1).reshape(numViews*numBatch, -1, 3), texture_type='vertex'), laplacian_loss, flatten_loss
 

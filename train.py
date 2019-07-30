@@ -37,9 +37,9 @@ parser.add_argument('--deviceIds', type=int, nargs='+', default=[0], help='the g
 # The training weight
 parser.add_argument('--lamS', type=float, default=1.0, help='weight Silhouette')
 parser.add_argument('--lamC', type=float, default=1.0, help='weight Color')
-parser.add_argument('--lamL', type=float, default=1.0, help='weight Laplacian')
-parser.add_argument('--lamP', type=float, default=1.0, help='weight Pixel loss')
-parser.add_argument('--lamF', type=float, default=0.003, help='weight Flatten loss')
+parser.add_argument('--lamL', type=float, default=0.3, help='weight Laplacian')
+parser.add_argument('--lamP', type=float, default=10.0, help='weight Pixel loss')
+parser.add_argument('--lamF', type=float, default=0.0003, help='weight Flatten loss')
 
 opt = parser.parse_args()
 print(opt)
@@ -78,7 +78,7 @@ imInputMaskBatch = Variable(torch.FloatTensor(opt.batchSize, 1, opt.imageSize, o
 # initialize models
 encoderInit = nn.DataParallel(models.Encoder(), device_ids=opt.deviceIds)
 decoderInit = nn.DataParallel(models.Decoder(numVertices=642+1), device_ids=opt.deviceIds) # Center to be predicted too
-
+colorInit = nn.DataParallel(models.Color(numVertices=642), device_ids=opt.deviceIds)
 
 ##############  ######################
 # Send things into GPU
@@ -88,14 +88,16 @@ if opt.cuda:
 
     encoderInit = encoderInit.cuda(opt.gpuId)
     decoderInit = decoderInit.cuda(opt.gpuId)
+    colorInit = colorInit.cuda(opt.gpuId)
 ####################################
 
 
 ####################################
 # Initial Optimizer
 scale = opt.scale
-opEncoderInit = optim.Adam(encoderInit.parameters(), lr=1e-2 * scale, betas=(0.5, 0.999) )
-opDecoderInit = optim.Adam(decoderInit.parameters(), lr=1e-2 * scale, betas=(0.5, 0.999) )
+opEncoderInit = optim.Adam(encoderInit.parameters(), lr=1e-3 * scale, betas=(0.5, 0.999) )
+opDecoderInit = optim.Adam(decoderInit.parameters(), lr=1e-3 * scale, betas=(0.5, 0.999) )
+opColorInit = optim.Adam(colorInit.parameters(), lr=1e-3 * scale, betas=(0.5, 0.999) )
 #####################################
 
 
@@ -120,11 +122,12 @@ dataLoaders = {"train": trainLoader, "val": validationLoader}
 dataLengths = {"train": len(trainLoader), "val": len(validationLoader)}
 ######################################
 
+pixelLoss = torch.nn.L1Loss()
 
 ######################################
 jj = 0
 writer = SummaryWriter(log_dir=opt.experiment)
-
+torch.set_printoptions(profile="full")
 for epoch in range(opt.nepoch):
     print('Epoch {}/{}'.format(epoch, opt.nepoch - 1))
     print ('===============================')
@@ -152,49 +155,60 @@ for epoch in range(opt.nepoch):
             fyuseId = dataBatch['fyuseId']
             imgInput = dataBatch['ImgInput'].cuda(opt.gpuId)
             imgInputMsk = dataBatch['ImgInputMsk'].cuda(opt.gpuId)
-            imgViews = dataBatch['ImgViews'].cuda(opt.gpuId)
+            imgViews = dataBatch['ImgViews'].reshape(currBatchSize*opt.numViews,opt.imageSize,opt.imageSize).cuda(opt.gpuId)
             projViews = dataBatch['ProjViews'].reshape(currBatchSize*opt.numViews,3,4).cuda(opt.gpuId)
             distViews = dataBatch['DistViews'].reshape(currBatchSize*opt.numViews,5).cuda(opt.gpuId)
+            colImgViews = dataBatch['ColImgViews'].reshape(currBatchSize*opt.numViews,3,opt.imageSize,opt.imageSize).cuda(opt.gpuId)
             templateVertex = dataBatch['TemplVertex'].cuda(opt.gpuId)
             templateFaces =  dataBatch['TemplFaces'].cuda(opt.gpuId)
 
             #imgMaskedInput = torch.cat([imgInput,imgInputMsk], dim=1)
             features = encoderInit(imgInput)
             outPos = decoderInit(features)
+            outCols = colorInit(features)
             #print (outPos.shape)
             meshM = models.MeshModel(templateFaces, templateVertex).cuda(opt.gpuId)
             # TODO : calculate lap and flat loss here..
-            meshDeformed, lapLoss, fltLoss = meshM.forward(outPos[:,:-1,:], torch.zeros_like(outPos[:,-1:,:]).cuda(), opt.numViews, currBatchSize)
+            meshDeformed, lapLoss, fltLoss = meshM.forward(outPos[:,:-1,:], torch.zeros_like(outPos[:,-1:,:]).cuda(), opt.numViews, currBatchSize, outCols)
             renderer = sr.SoftRenderer(image_size=opt.imageSize, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projViews, orig_size=opt.origImageSize)
             imagesPred = renderer.render_mesh(meshDeformed)
-            SS = losses.SilhouetteLoss(imagesPred[:, 3], imgViews.reshape(currBatchSize*opt.numViews,opt.imageSize,opt.imageSize))
+
+            SS = losses.SilhouetteLoss(imagesPred[:, 3], imgViews)
+            pixelL = pixelLoss(imagesPred[:,0:3,:,:]*(imgViews.unsqueeze(1)), (colImgViews/255.0)*(imgViews.unsqueeze(1)))
+            
             loss = lamS*SS + \
                    lamL*lapLoss + \
-                   lamF*fltLoss
+                   lamF*fltLoss +\
+                   lamP*pixelL
             
             # Train net..
             opEncoderInit.zero_grad()
             opDecoderInit.zero_grad()
-
+            opColorInit.zero_grad()
 
             if jj % 10 == 0 and phase == 'train':
                 images = imagesPred.detach().cpu().numpy()
-                imagesGt = imgViews.detach().cpu().numpy().reshape(opt.batchSize*opt.numViews,opt.imageSize,opt.imageSize)
+                imagesGt = imgViews.detach().cpu().numpy() 
+                colImagesGt = colImgViews.detach().cpu().numpy()
+
                 numFrames = 20 # Save only 20 frames..
-                globalImg = 255 * np.ones((opt.imageSize*int(numFrames/10 + 1),opt.imageSize*10), dtype=np.uint8)
-                globalImgGt = np.zeros((opt.imageSize*int(numFrames/10 + 1),opt.imageSize*10), dtype=np.uint8)
+                globalImg = 255 * np.ones((opt.imageSize*int(numFrames/5 + 1),opt.imageSize*5), dtype=np.uint8)
+                globalImgGt = np.zeros((opt.imageSize*int(numFrames/5 + 1),opt.imageSize*5), dtype=np.uint8)
+                globalColViews = np.zeros((3,opt.imageSize*int(numFrames/5 + 1),opt.imageSize*5), dtype=np.float32)
+                globalColViewsGt = np.zeros((3,opt.imageSize*int(numFrames/5 + 1),opt.imageSize*5), dtype=np.float32)
                 for i in range(numFrames) : 
-                    col = int(i % 10)
-                    row = int(i / 10)
+                    col = int(i % 5)
+                    row = int(i / 5)
                     image = images[i].transpose((1,2,0))
                     globalImg[row*opt.imageSize:row*opt.imageSize + opt.imageSize,col*opt.imageSize:col*opt.imageSize + opt.imageSize] = (255 - 255*image[...,-1]).astype(np.uint8)
                     globalImgGt[row*opt.imageSize:row*opt.imageSize + opt.imageSize,col*opt.imageSize:col*opt.imageSize + opt.imageSize] = (127.5*imagesGt[i]).astype(np.uint8)
+                    globalColViewsGt[:,row*opt.imageSize:row*opt.imageSize + opt.imageSize,col*opt.imageSize:col*opt.imageSize + opt.imageSize] = colImagesGt[i]
+                    globalColViews[:,row*opt.imageSize:row*opt.imageSize + opt.imageSize,col*opt.imageSize:col*opt.imageSize + opt.imageSize] = images[i,0:3,:,:]
 
-                
                 imageio.imsave(os.path.join(opt.experiment, fyuseId[0]+'_deform_%05d.png'%ii), globalImg+globalImgGt)
-
-                # save optimized mesh
                 imageio.imsave(os.path.join(opt.experiment, fyuseId[0]+'_groundT_%05d.png'%ii), globalImgGt)
+                imageio.imsave(os.path.join(opt.experiment, fyuseId[0]+'_groundTCol_%05d.jpg'%ii), globalColViewsGt.astype(np.uint8).transpose(1,2,0))
+                imageio.imsave(os.path.join(opt.experiment, fyuseId[0]+'_DeformCol_%05d.jpg'%ii), globalColViews.astype(np.uint8).transpose(1,2,0))
                 # save to tensorboard!!
                 writer.add_image("Deformed and Ground Truth", globalImg+globalImgGt, global_step=jj, dataformats='HW')
             writer.add_scalar(tag=phase, scalar_value=loss.item(), global_step=jj)
@@ -203,11 +217,12 @@ for epoch in range(opt.nepoch):
                 loss.backward()
                 opDecoderInit.step()
                 opEncoderInit.step()
+                opColorInit.step()
             if phase == 'val' and (jj % 10 == 0): 
                 # Running val in batchsize 1..
-                meshM.forward(outPos[:,:-1,:], torch.zeros_like(outPos[:,-1:,:]).cuda(), 1, 1)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_val_car.obj'), save_texture=False)
+                meshM.forward(outPos[:,:-1,:], torch.zeros_like(outPos[:,-1:,:]).cuda(), 1, 1, outCols)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_val_car.obj'), save_texture=False)
             elif phase == 'train' and (jj % 100 == 0):
-                meshM.forward(outPos[0,:-1,:], torch.zeros_like(outPos[0,-1:,:]).cuda(), 1, 1)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_train_car.obj'), save_texture=False)
+                meshM.forward(outPos[0,:-1,:], torch.zeros_like(outPos[0,-1:,:]).cuda(), 1, 1, outCols)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_train_car.obj'), save_texture=False)
             runningLoss += loss
             loop.set_description('Loss: %.4f'%(loss.item()))
             #print (runningLoss/(ii+1.))

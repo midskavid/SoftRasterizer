@@ -61,9 +61,12 @@ class BatchLoader(Dataset):
         imgViews = []
         projViews = []
         distViews = []
+        colImgViews = []
 
         for ii in range(self.numViews): 
             frameIndx = int(self.dataViewMaskNames[fyuseId][indexes[ii+1]].split('/')[-1].replace('depth','').replace('.png',''))
+            colFrame = self.dataViewMaskNames[fyuseId][indexes[ii+1]].split('/')[-1].replace('depth','').replace('0','',1)
+            colImgViews.append(self.LoadImage(os.path.join(self.dataRoot, 'Fyuses', fyuseId,'unstabilized','stabilized_'+colFrame), normalize=False))
             imgViews.append(self.LoadMaskFromDepth(self.dataViewMaskNames[fyuseId][indexes[ii+1]]))
             projViews.append(self.dataProjectionMat[fyuseId][frameIndx]['P'])
             distViews.append(self.dataProjectionMat[fyuseId][frameIndx]['distortion'])
@@ -71,6 +74,7 @@ class BatchLoader(Dataset):
         imgViews = np.stack(imgViews)
         projViews = np.stack(projViews)
         distViews = np.stack(distViews)
+        colImgViews = np.stack(colImgViews)
 
         batchDict = {'fyuseId': fyuseId, 
                      'ImgInput': imgInput,
@@ -78,6 +82,7 @@ class BatchLoader(Dataset):
                      'ImgViews': imgViews,
                      'ProjViews': projViews,
                      'DistViews': distViews,
+                     'ColImgViews': colImgViews,
                      'TemplVertex': self.templateVertex,
                      'TemplFaces': self.templateFaces
                     }
@@ -85,7 +90,7 @@ class BatchLoader(Dataset):
         return batchDict
 
 
-    def LoadImage(self, imName, isGama = False):
+    def LoadImage(self, imName, isGama = False, normalize=True):
         if not os.path.isfile(imName):
             print('Fail to load {0}'.format(imName) )
             im = np.zeros([3, self.imSize, self.imSize], dtype=np.float32)
@@ -98,11 +103,12 @@ class BatchLoader(Dataset):
         im = np.asarray(imSq, dtype=np.float32)
 
         #### Image being fed to the network has to be normalized but the different views should not be normalized...
-        if isGama:
-            im = (im / 255.0) ** 2.2
-            im = 2 * im - 1
-        else:
-            im = (im - 127.5) / 127.5
+        if normalize : 
+            if isGama:
+                im = (im / 255.0) ** 2.2
+                im = 2 * im - 1
+            else:
+                im = (im - 127.5) / 127.5
         if len(im.shape) == 2:
             im = im[:, np.newaxis]
         im = np.transpose(im, [2, 0, 1])
@@ -225,19 +231,22 @@ class BatchLoader(Dataset):
         distViews = dataBatch['DistViews']
         templateVertex = dataBatch['TemplVertex']
         templateFaces =  dataBatch['TemplFaces']
+        colImgViews = dataBatch['ColImgViews']
 
         fyuseId = self.dataFyuseList[2]
         numFrames = len(imgViews)
         imageio.imsave(os.path.join(dataDir,fyuseId+'inputImg.jpg'), (imgInput*127.5+127.5).transpose(1,2,0).astype('uint8'))
         imageio.imsave(os.path.join(dataDir,fyuseId+'inputImgMask.jpg'), (255*imgInputMsk[0,:,:]).astype('uint8'))
         globalImg = 255 * np.zeros((self.imSize*int(numFrames/5 + 1),self.imSize*5), dtype=np.uint8)
-
+        globalColViews = np.zeros((3,self.imSize*int(numFrames/5 + 1),self.imSize*5), dtype=np.float32)
         for ii in range(numFrames) : 
             col = int(ii % 5)
             row = int(ii / 5)
             globalImg[row*self.imSize:row*self.imSize + self.imSize,col*self.imSize:col*self.imSize + self.imSize] = (255*imgViews[ii][0]).astype(np.uint8)
-
+            globalColViews[:,row*self.imSize:row*self.imSize + self.imSize,col*self.imSize:col*self.imSize + self.imSize] = colImgViews[ii]
         imageio.imsave(os.path.join(dataDir, fyuseId+'Views.png'), globalImg)
+        imageio.imsave(os.path.join(dataDir, fyuseId+'ColViews.png'), globalColViews.astype(np.uint8).transpose(1,2,0))
+        imageio.imsave(os.path.join(dataDir, fyuseId+'ColViewsMasked.png'), ((globalColViews/255.0)*globalImg[np.newaxis]).astype(np.uint8).transpose(1,2,0))
 
         # Now project vertices and see if they are in the field of view...
         templateVertex = np.concatenate([templateVertex, np.ones_like(templateVertex[ :, None, 0])], axis=-1)
