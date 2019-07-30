@@ -137,9 +137,11 @@ for epoch in range(opt.nepoch):
         if phase == 'train':
             encoderInit.train(True)  # Set model to training mode
             decoderInit.train(True)
+            colorInit.train(True)
         else:
             encoderInit.train(False)  # Set model to evaluate mode
             decoderInit.train(False)
+            colorInit.train(False)
 
         runningLoss = 0.0
         loop = tqdm.tqdm(list(range(dataLengths[phase])), ascii=True)
