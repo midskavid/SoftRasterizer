@@ -55,7 +55,7 @@ class Decoder(nn.Module):
         x1 = self.ac1(self.bn1(self.fc1(x)))
         x2 = self.ac2(self.bn2(self.fc2(x1)))
         # x3 = self.ac3(self.bn3(self.fc3(x2)))
-        x3 = self.bn3(self.fc3(x2))
+        x3 = self.fc3(x2)
         return x3.reshape((-1,self.numVertices,3))
 
 class MeshModel(nn.Module):
