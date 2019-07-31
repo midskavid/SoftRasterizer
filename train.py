@@ -8,6 +8,7 @@ import tqdm
 import imageio
 #import utils
 import DataLoader
+import DebugHelper
 import torch.nn as nn
 import numpy as np
 import torch.optim as optim
@@ -16,7 +17,6 @@ import soft_renderer as sr
 from torch.autograd import Variable
 from torch.utils.tensorboard import SummaryWriter
 
-#from torch.utils.data import DataLoader
 
 parser = argparse.ArgumentParser()
 # The locationi of training set
@@ -52,6 +52,7 @@ if opt.experiment is None:
 os.system('mkdir {0}'.format(opt.experiment))
 #Clean Directory
 os.system('rm {0}/*'.format(opt.experiment))
+os.system('mkdir {0}/tmp'.format(opt.experiment))
 os.system('cp *.py %s' % opt.experiment )
 
 lamS = opt.lamS
@@ -128,109 +129,114 @@ pixelLoss = torch.nn.L1Loss()
 jj = 0
 writer = SummaryWriter(log_dir=opt.experiment)
 torch.set_printoptions(profile="full")
-for epoch in range(opt.nepoch):
-    print('Epoch {}/{}'.format(epoch, opt.nepoch - 1))
-    print ('===============================')
 
-    # Each epoch has a training and validation phase
-    for phase in ['train', 'val'] : #['val', 'train'] ['train', 'val']
-        if phase == 'train':
-            encoderInit.train(True)  # Set model to training mode
-            decoderInit.train(True)
-            colorInit.train(True)
-        else:
-            encoderInit.train(False)  # Set model to evaluate mode
-            decoderInit.train(False)
-            colorInit.train(False)
+with DebugHelper.GuruMeditation() as gr :
+    for epoch in range(opt.nepoch):
+        print('Epoch {}/{}'.format(epoch, opt.nepoch - 1))
+        print ('===============================')
 
-        runningLoss = 0.0
-        loop = tqdm.tqdm(list(range(dataLengths[phase])), ascii=True)
+        # Each epoch has a training and validation phase
+        for phase in ['train', 'val'] : #['val', 'train'] ['train', 'val']
+            if phase == 'train':
+                encoderInit.train(True)  # Set model to training mode
+                decoderInit.train(True)
+                colorInit.train(True)
+            else:
+                encoderInit.train(False)  # Set model to evaluate mode
+                decoderInit.train(False)
+                colorInit.train(False)
 
-        # Iterate over data.
-        for ii, dataBatch in zip(loop,dataLoaders[phase]):
-            # Dataloader would return me Projection matrices and the input images and ground truth images. 
-            # The manner in which dataloader creates batch, I will have to reshape them to have batch = batch*numViews
-            # For mesh vertices and faces, I will get the correct format batchxnumVertx3.
-            # This will be changed to the appropriate format with the forward of the dataloader.
-            currBatchSize = len(dataBatch['ImgInput'])
+            runningLoss = 0.0
+            loop = tqdm.tqdm(list(range(dataLengths[phase])), ascii=True)
 
-            fyuseId = dataBatch['fyuseId']
-            imgInput = dataBatch['ImgInput'].cuda(opt.gpuId)
-            imgInputMsk = dataBatch['ImgInputMsk'].cuda(opt.gpuId)
-            imgViews = dataBatch['ImgViews'].reshape(currBatchSize*opt.numViews,opt.imageSize,opt.imageSize).cuda(opt.gpuId)
-            projViews = dataBatch['ProjViews'].reshape(currBatchSize*opt.numViews,3,4).cuda(opt.gpuId)
-            distViews = dataBatch['DistViews'].reshape(currBatchSize*opt.numViews,5).cuda(opt.gpuId)
-            colImgViews = dataBatch['ColImgViews'].reshape(currBatchSize*opt.numViews,3,opt.imageSize,opt.imageSize).cuda(opt.gpuId)
-            templateVertex = dataBatch['TemplVertex'].cuda(opt.gpuId)
-            templateFaces =  dataBatch['TemplFaces'].cuda(opt.gpuId)
+            # Iterate over data.
+            for ii, dataBatch in zip(loop,dataLoaders[phase]):
+                # Dataloader would return me Projection matrices and the input images and ground truth images. 
+                # The manner in which dataloader creates batch, I will have to reshape them to have batch = batch*numViews
+                # For mesh vertices and faces, I will get the correct format batchxnumVertx3.
+                # This will be changed to the appropriate format with the forward of the dataloader.
+                currBatchSize = len(dataBatch['ImgInput'])
 
-            #imgMaskedInput = torch.cat([imgInput,imgInputMsk], dim=1)
-            features = encoderInit(imgInput)
-            outPos = decoderInit(features)
-            outCols = colorInit(features)
-            #print (outPos.shape)
-            meshM = models.MeshModel(templateFaces, templateVertex).cuda(opt.gpuId)
-            # TODO : calculate lap and flat loss here..
-            meshDeformed, lapLoss, fltLoss = meshM.forward(outPos[:,:-1,:], torch.zeros_like(outPos[:,-1:,:]).cuda(), opt.numViews, currBatchSize, outCols)
-            renderer = sr.SoftRenderer(image_size=opt.imageSize, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projViews, orig_size=opt.origImageSize)
-            imagesPred = renderer.render_mesh(meshDeformed)
+                fyuseId = dataBatch['fyuseId']
+                imgInput = dataBatch['ImgInput'].cuda(opt.gpuId)
+                imgInputMsk = dataBatch['ImgInputMsk'].cuda(opt.gpuId)
+                imgViews = dataBatch['ImgViews'].reshape(currBatchSize*opt.numViews,opt.imageSize,opt.imageSize).cuda(opt.gpuId)
+                projViews = dataBatch['ProjViews'].reshape(currBatchSize*opt.numViews,3,4).cuda(opt.gpuId)
+                distViews = dataBatch['DistViews'].reshape(currBatchSize*opt.numViews,5).cuda(opt.gpuId)
+                colImgViews = dataBatch['ColImgViews'].reshape(currBatchSize*opt.numViews,3,opt.imageSize,opt.imageSize).cuda(opt.gpuId)
+                templateVertex = dataBatch['TemplVertex'].cuda(opt.gpuId)
+                templateFaces =  dataBatch['TemplFaces'].cuda(opt.gpuId)
+
+                #imgMaskedInput = torch.cat([imgInput,imgInputMsk], dim=1)
+                features = encoderInit(imgInput)
+                outPos = decoderInit(features)
+                outCols = colorInit(features)
+                #print (outPos.shape)
+                meshM = models.MeshModel(templateFaces, templateVertex).cuda(opt.gpuId)
+                # TODO : calculate lap and flat loss here..
+                meshDeformed, lapLoss, fltLoss = meshM.forward(outPos[:,:-1,:], torch.zeros_like(outPos[:,-1:,:]).cuda(), opt.numViews, currBatchSize, outCols)
+                renderer = sr.SoftRenderer(image_size=opt.imageSize, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projViews, orig_size=opt.origImageSize)
+                imagesPred = renderer.render_mesh(meshDeformed)
+                
+                SS = losses.SilhouetteLoss(imagesPred[:, 3], imgViews)
+                pixelL = pixelLoss(imagesPred[:,0:3,:,:]*(imgViews.unsqueeze(1)), (colImgViews/255.0)*(imgViews.unsqueeze(1)))
+                
+                loss = lamS*SS + \
+                       lamL*lapLoss + \
+                       lamF*fltLoss +\
+                       lamP*pixelL
+                
+                # Train net..
+                opEncoderInit.zero_grad()
+                opDecoderInit.zero_grad()
+                opColorInit.zero_grad()
+
+                if jj % 10 == 0 and phase == 'train':
+                    images = imagesPred.detach().cpu().numpy()
+                    imagesGt = imgViews.detach().cpu().numpy() 
+                    colImagesGt = colImgViews.detach().cpu().numpy()
+
+                    numFrames = 20 # Save only 20 frames..
+                    globalImg = 255 * np.ones((opt.imageSize*int(numFrames/5 + 1),opt.imageSize*5), dtype=np.uint8)
+                    globalImgGt = np.zeros((opt.imageSize*int(numFrames/5 + 1),opt.imageSize*5), dtype=np.uint8)
+                    globalColViews = np.zeros((3,opt.imageSize*int(numFrames/5 + 1),opt.imageSize*5), dtype=np.float32)
+                    globalColViewsGt = np.zeros((3,opt.imageSize*int(numFrames/5 + 1),opt.imageSize*5), dtype=np.float32)
+                    for i in range(numFrames) : 
+                        col = int(i % 5)
+                        row = int(i / 5)
+                        image = images[i].transpose((1,2,0))
+                        globalImg[row*opt.imageSize:row*opt.imageSize + opt.imageSize,col*opt.imageSize:col*opt.imageSize + opt.imageSize] = (255 - 255*image[...,-1]).astype(np.uint8)
+                        globalImgGt[row*opt.imageSize:row*opt.imageSize + opt.imageSize,col*opt.imageSize:col*opt.imageSize + opt.imageSize] = (127.5*imagesGt[i]).astype(np.uint8)
+                        globalColViewsGt[:,row*opt.imageSize:row*opt.imageSize + opt.imageSize,col*opt.imageSize:col*opt.imageSize + opt.imageSize] = colImagesGt[i]
+                        globalColViews[:,row*opt.imageSize:row*opt.imageSize + opt.imageSize,col*opt.imageSize:col*opt.imageSize + opt.imageSize] = images[i,0:3,:,:]
+
+                    imageio.imsave(os.path.join(opt.experiment, fyuseId[0]+'_deform_%05d.png'%ii), globalImg+globalImgGt)
+                    imageio.imsave(os.path.join(opt.experiment, fyuseId[0]+'_groundT_%05d.png'%ii), globalImgGt)
+                    imageio.imsave(os.path.join(opt.experiment, fyuseId[0]+'_groundTCol_%05d.jpg'%ii), globalColViewsGt.astype(np.uint8).transpose(1,2,0))
+                    imageio.imsave(os.path.join(opt.experiment, fyuseId[0]+'_DeformCol_%05d.jpg'%ii), (255*globalColViews).astype(np.uint8).transpose(1,2,0))
+                    # save to tensorboard!!
+                    writer.add_image("Deformed and Ground Truth", globalImg+globalImgGt, global_step=jj, dataformats='HW')
+                writer.add_scalar(tag=phase, scalar_value=loss.item(), global_step=jj)
+
+                if phase == 'train':                
+                    loss.backward()
+                    DebugHelper.PlotGradFlow(encoderInit.named_parameters(), os.path.join(opt.experiment,'tmp'), epoch, 'Encoder')
+                    DebugHelper.PlotGradFlow(decoderInit.named_parameters(), os.path.join(opt.experiment,'tmp'), epoch, 'Encoder')
+                    DebugHelper.PlotGradFlow(colorInit.named_parameters(), os.path.join(opt.experiment,'tmp'), epoch, 'Encoder')
+                    opDecoderInit.step()
+                    opEncoderInit.step()
+                    opColorInit.step()
+                if phase == 'val' and (jj % 10 == 0): 
+                    # Running val in batchsize 1..
+                    meshM.forward(outPos[:,:-1,:], torch.zeros_like(outPos[:,-1:,:]).cuda(), 1, 1, outCols)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_val_car.obj'), save_texture=False)
+                elif phase == 'train' and (jj % 100 == 0):
+                    meshM.forward(outPos[0,:-1,:], torch.zeros_like(outPos[0,-1:,:]).cuda(), 1, 1, outCols)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_train_car.obj'), save_texture=False)
+                runningLoss += loss
+                loop.set_description('Loss: %.4f'%(loss.item()))
+                #print (runningLoss/(ii+1.))
+                jj += 1
+
+            epochLoss = runningLoss / dataLengths[phase]
+            print('{} Loss: {:.4f}'.format(phase, epochLoss))
             
-            SS = losses.SilhouetteLoss(imagesPred[:, 3], imgViews)
-            pixelL = pixelLoss(imagesPred[:,0:3,:,:]*(imgViews.unsqueeze(1)), (colImgViews/255.0)*(imgViews.unsqueeze(1)))
-            
-            loss = lamS*SS + \
-                   lamL*lapLoss + \
-                   lamF*fltLoss +\
-                   lamP*pixelL
-            
-            # Train net..
-            opEncoderInit.zero_grad()
-            opDecoderInit.zero_grad()
-            opColorInit.zero_grad()
-
-            if jj % 10 == 0 and phase == 'train':
-                images = imagesPred.detach().cpu().numpy()
-                imagesGt = imgViews.detach().cpu().numpy() 
-                colImagesGt = colImgViews.detach().cpu().numpy()
-
-                numFrames = 20 # Save only 20 frames..
-                globalImg = 255 * np.ones((opt.imageSize*int(numFrames/5 + 1),opt.imageSize*5), dtype=np.uint8)
-                globalImgGt = np.zeros((opt.imageSize*int(numFrames/5 + 1),opt.imageSize*5), dtype=np.uint8)
-                globalColViews = np.zeros((3,opt.imageSize*int(numFrames/5 + 1),opt.imageSize*5), dtype=np.float32)
-                globalColViewsGt = np.zeros((3,opt.imageSize*int(numFrames/5 + 1),opt.imageSize*5), dtype=np.float32)
-                for i in range(numFrames) : 
-                    col = int(i % 5)
-                    row = int(i / 5)
-                    image = images[i].transpose((1,2,0))
-                    globalImg[row*opt.imageSize:row*opt.imageSize + opt.imageSize,col*opt.imageSize:col*opt.imageSize + opt.imageSize] = (255 - 255*image[...,-1]).astype(np.uint8)
-                    globalImgGt[row*opt.imageSize:row*opt.imageSize + opt.imageSize,col*opt.imageSize:col*opt.imageSize + opt.imageSize] = (127.5*imagesGt[i]).astype(np.uint8)
-                    globalColViewsGt[:,row*opt.imageSize:row*opt.imageSize + opt.imageSize,col*opt.imageSize:col*opt.imageSize + opt.imageSize] = colImagesGt[i]
-                    globalColViews[:,row*opt.imageSize:row*opt.imageSize + opt.imageSize,col*opt.imageSize:col*opt.imageSize + opt.imageSize] = images[i,0:3,:,:]
-
-                imageio.imsave(os.path.join(opt.experiment, fyuseId[0]+'_deform_%05d.png'%ii), globalImg+globalImgGt)
-                imageio.imsave(os.path.join(opt.experiment, fyuseId[0]+'_groundT_%05d.png'%ii), globalImgGt)
-                imageio.imsave(os.path.join(opt.experiment, fyuseId[0]+'_groundTCol_%05d.jpg'%ii), globalColViewsGt.astype(np.uint8).transpose(1,2,0))
-                imageio.imsave(os.path.join(opt.experiment, fyuseId[0]+'_DeformCol_%05d.jpg'%ii), (255*globalColViews).astype(np.uint8).transpose(1,2,0))
-                # save to tensorboard!!
-                writer.add_image("Deformed and Ground Truth", globalImg+globalImgGt, global_step=jj, dataformats='HW')
-            writer.add_scalar(tag=phase, scalar_value=loss.item(), global_step=jj)
-
-            if phase == 'train':                
-                loss.backward()
-                opDecoderInit.step()
-                opEncoderInit.step()
-                opColorInit.step()
-            if phase == 'val' and (jj % 10 == 0): 
-                # Running val in batchsize 1..
-                meshM.forward(outPos[:,:-1,:], torch.zeros_like(outPos[:,-1:,:]).cuda(), 1, 1, outCols)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_val_car.obj'), save_texture=False)
-            elif phase == 'train' and (jj % 100 == 0):
-                meshM.forward(outPos[0,:-1,:], torch.zeros_like(outPos[0,-1:,:]).cuda(), 1, 1, outCols)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_train_car.obj'), save_texture=False)
-            runningLoss += loss
-            loop.set_description('Loss: %.4f'%(loss.item()))
-            #print (runningLoss/(ii+1.))
-            jj += 1
-
-        epochLoss = runningLoss / dataLengths[phase]
-        print('{} Loss: {:.4f}'.format(phase, epochLoss))
-        
-    print ('===============================\n\n')
+        print ('===============================\n\n')
