@@ -51,7 +51,7 @@ if opt.experiment is None:
     opt.experiment = 'CheckMeshGen'
 os.system('mkdir {0}'.format(opt.experiment))
 #Clean Directory
-os.system('rm {0}/*'.format(opt.experiment))
+os.system('rm -r {0}/*'.format(opt.experiment))
 os.system('mkdir {0}/tmp'.format(opt.experiment))
 os.system('cp *.py %s' % opt.experiment )
 
@@ -146,6 +146,7 @@ with DebugHelper.GuruMeditation() as gr :
                 decoderInit.train(False)
                 colorInit.train(False)
 
+            createMesh = True
             runningLoss = 0.0
             loop = tqdm.tqdm(list(range(dataLengths[phase])), ascii=True)
 
@@ -164,15 +165,17 @@ with DebugHelper.GuruMeditation() as gr :
                 projViews = dataBatch['ProjViews'].reshape(currBatchSize*opt.numViews,3,4).cuda(opt.gpuId)
                 distViews = dataBatch['DistViews'].reshape(currBatchSize*opt.numViews,5).cuda(opt.gpuId)
                 colImgViews = dataBatch['ColImgViews'].reshape(currBatchSize*opt.numViews,3,opt.imageSize,opt.imageSize).cuda(opt.gpuId)
-                templateVertex = dataBatch['TemplVertex'].cuda(opt.gpuId)
-                templateFaces =  dataBatch['TemplFaces'].cuda(opt.gpuId)
 
                 #imgMaskedInput = torch.cat([imgInput,imgInputMsk], dim=1)
                 features = encoderInit(imgInput)
                 outPos = decoderInit(features)
                 outCols = colorInit(features)
                 #print (outPos.shape)
-                meshM = models.MeshModel(templateFaces, templateVertex).cuda(opt.gpuId)
+                if createMesh :
+                    templateVertex = dataBatch['TemplVertex'].cuda(opt.gpuId)
+                    templateFaces =  dataBatch['TemplFaces'].cuda(opt.gpuId)
+                    meshM = models.MeshModel(templateFaces, templateVertex).cuda(opt.gpuId)
+                    createMesh = False
                 # TODO : calculate lap and flat loss here..
                 meshDeformed, lapLoss, fltLoss = meshM.forward(outPos[:,:-1,:], torch.zeros_like(outPos[:,-1:,:]).cuda(), opt.numViews, currBatchSize, outCols)
                 renderer = sr.SoftRenderer(image_size=opt.imageSize, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projViews, orig_size=opt.origImageSize)
