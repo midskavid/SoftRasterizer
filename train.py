@@ -232,7 +232,7 @@ with DebugHelper.GuruMeditation() as gr :
                 if phase == 'val' and (jj % 10 == 0): 
                     # Running val in batchsize 1..
                     meshM.forward(outPos[:,:-1,:], torch.zeros_like(outPos[:,-1:,:]).cuda(), 1, 1, outCols)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_val_car.obj'), save_texture=False)
-                elif phase == 'train' and (jj % 100 == 0):
+                elif phase == 'train' and (jj % 10 == 0):
                     meshM.forward(outPos[0,:-1,:], torch.zeros_like(outPos[0,-1:,:]).cuda(), 1, 1, outCols)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_train_car.obj'), save_texture=False)
                 runningLoss += loss
                 loop.set_description('Loss: %.4f'%(loss.item()))

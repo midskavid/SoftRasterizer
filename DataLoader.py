@@ -186,7 +186,7 @@ class BatchLoader(Dataset):
 
                 intrinsics = np.array(pose['anchor']['intrinsicsVector'])
                 K = [
-                    [intrinsics[0], intrinsics[2], intrinsics[3]-0.5], [0, intrinsics[1], intrinsics[4] + pad - 0.5], [0, 0, 1]
+                    [intrinsics[0], intrinsics[2], intrinsics[3]+0.5], [0, intrinsics[1], intrinsics[4] + pad+0.5], [0, 0, 1]
                 ]
 
                 K = np.array(K)
