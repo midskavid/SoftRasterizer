@@ -61,18 +61,24 @@ class Decoder(nn.Module):
 
 
 class Color(nn.Module) : 
-    def __init__(self, numVertices=642):
+    def __init__(self, imSize, numCols, numVertices=642):
         super(Color, self).__init__()
         self.numVertices = numVertices
+        self.imSize = imSize
+        self.numCols = numCols
         self.fc1 = nn.Linear(512, 1024, bias=False)
         self.bn1 = nn.BatchNorm1d(1024)
         self.ac1 = nn.LeakyReLU()
-        self.fc2 = nn.Linear(1024, numVertices*3)
+        self.fc2Sampler = nn.Linear(1024, numCols*imSize*imSize)
+        self.fc2Selection = nn.Linear(1024, numVertices*numCols)
     
     def forward(self, x) :
         x1 = self.ac1(self.bn1(self.fc1(x)))
-        x2 = torch.sigmoid(self.fc2(x1)) # map colors to [0,1]
-        return x2.reshape((-1,self.numVertices,3)) 
+        xSampling = torch.softmax(self.fc2Sampler(x1).reshape(-1,self.numCols,self.imSize*self.imSize), dim=1)
+        xSelection = torch.softmax(self.fc2Selection(x1).reshape(-1,self.numVertices,self.numCols), dim=1)
+        # colPalette = torch.bmm(xSampling, im)
+        # return torch.bmm(xSelection,colPalette)
+        return xSampling, xSelection        
 
 
 

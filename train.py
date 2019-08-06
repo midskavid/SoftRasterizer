@@ -28,7 +28,8 @@ parser.add_argument('--scale', type=float, default=1.0, help='learning rate scal
 parser.add_argument('--nepoch', type=int, default=200, help='the number of epochs for training')
 parser.add_argument('--batchSize', type=int, default=2, help='input batch size')
 parser.add_argument('--numViews', type=int, default=15, help='views for training')
-parser.add_argument('--validationSplit', type=float, default=0.1, help='data used for validation')
+parser.add_argument('--numColors', type=int, default=4, help='number of Colors in Palette')
+parser.add_argument('--validationSplit', type=float, default=0.05, help='data used for validation')
 parser.add_argument('--imageSize', type=int, default=256, help='the height / width of the input image to network')
 parser.add_argument('--origImageSize', type=int, default=1920, help='the height / width of the actual image')
 parser.add_argument('--pad', type=int, default=420, help='The amount of padding added at top and bottom of image')
@@ -43,7 +44,7 @@ parser.add_argument('--lamF', type=float, default=0.0003, help='weight Flatten l
 
 opt = parser.parse_args()
 print(opt)
-#torch.backends.cudnn.enabled = False
+torch.backends.cudnn.enabled = False
 
 opt.gpuId = opt.deviceIds[0]
 
@@ -79,7 +80,7 @@ imInputMaskBatch = Variable(torch.FloatTensor(opt.batchSize, 1, opt.imageSize, o
 # initialize models
 encoderInit = nn.DataParallel(models.Encoder(), device_ids=opt.deviceIds)
 decoderInit = nn.DataParallel(models.Decoder(numVertices=642+1), device_ids=opt.deviceIds) # Center to be predicted too
-colorInit = nn.DataParallel(models.Color(numVertices=642), device_ids=opt.deviceIds)
+colorInit = nn.DataParallel(models.Color(opt.imageSize, opt.numColors, numVertices=642), device_ids=opt.deviceIds)
 
 ##############  ######################
 # Send things into GPU
@@ -136,7 +137,7 @@ with DebugHelper.GuruMeditation() as gr :
         print ('===============================')
 
         # Each epoch has a training and validation phase
-        for phase in ['train', 'val'] : #['val', 'train'] ['train', 'val']
+        for phase in ['train'] : #['val', 'train'] ['train', 'val']
             if phase == 'train':
                 encoderInit.train(True)  # Set model to training mode
                 decoderInit.train(True)
@@ -169,7 +170,9 @@ with DebugHelper.GuruMeditation() as gr :
                 #imgMaskedInput = torch.cat([imgInput,imgInputMsk], dim=1)
                 features = encoderInit(imgInput)
                 outPos = decoderInit(features)
-                outCols = colorInit(features)
+                xSampling, xSelection = colorInit(features)
+                colPalette = torch.bmm(xSampling, ((imgInput/2.+.5)*imgInputMsk).reshape(-1,opt.imageSize*opt.imageSize,3))
+                outCols = torch.bmm(xSelection,colPalette)
                 #print (outPos.shape)
                 if createMesh :
                     templateVertex = dataBatch['TemplVertex'].cuda(opt.gpuId)
