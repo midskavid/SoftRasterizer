@@ -1,3 +1,5 @@
+# For multiGPU export the GPUs as the code inside just pushes everything to GPU 0
+# CUDA_VISIBLE_DEVICES=1,2 python3 train.py --cuda --deviceIds 0 1
 import torch
 import argparse
 import random
@@ -43,7 +45,7 @@ parser.add_argument('--lamF', type=float, default=0.0003, help='weight Flatten l
 
 opt = parser.parse_args()
 print(opt)
-#torch.backends.cudnn.enabled = False
+# torch.backends.cudnn.enabled = False
 
 opt.gpuId = opt.deviceIds[0]
 
@@ -177,7 +179,7 @@ with DebugHelper.GuruMeditation() as gr :
                     meshM = models.MeshModel(templateFaces, templateVertex).cuda(opt.gpuId)
                     createMesh = False
                 # TODO : calculate lap and flat loss here..
-                meshDeformed, lapLoss, fltLoss = meshM.forward(outPos[:,:-1,:], torch.zeros_like(outPos[:,-1:,:]).cuda(), opt.numViews, currBatchSize, outCols)
+                meshDeformed, lapLoss, fltLoss = meshM.forward(outPos[:,:-1,:], torch.zeros_like(outPos[:,-1:,:]).cuda(opt.gpuId), opt.numViews, currBatchSize, outCols)
                 renderer = sr.SoftRenderer(image_size=opt.imageSize, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projViews, orig_size=opt.origImageSize)
                 imagesPred = renderer.render_mesh(meshDeformed)
                 
@@ -231,9 +233,9 @@ with DebugHelper.GuruMeditation() as gr :
                     opColorInit.step()
                 if phase == 'val' and (jj % 10 == 0): 
                     # Running val in batchsize 1..
-                    meshM.forward(outPos[:,:-1,:], torch.zeros_like(outPos[:,-1:,:]).cuda(), 1, 1, outCols)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_val_car.obj'), save_texture=False)
+                    meshM.forward(outPos[:,:-1,:], torch.zeros_like(outPos[:,-1:,:]).cuda(opt.gpuId), 1, 1, outCols)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_val_car.obj'), save_texture=False)
                 elif phase == 'train' and (jj % 10 == 0):
-                    meshM.forward(outPos[0,:-1,:], torch.zeros_like(outPos[0,-1:,:]).cuda(), 1, 1, outCols)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_train_car.obj'), save_texture=False)
+                    meshM.forward(outPos[0,:-1,:], torch.zeros_like(outPos[0,-1:,:]).cuda(opt.gpuId), 1, 1, outCols)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_train_car.obj'), save_texture=False)
                 runningLoss += loss
                 loop.set_description('Loss: %.4f'%(loss.item()))
                 #print (runningLoss/(ii+1.))
