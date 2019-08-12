@@ -243,5 +243,17 @@ with DebugHelper.GuruMeditation() as gr :
 
             epochLoss = runningLoss / dataLengths[phase]
             print('{} Loss: {:.4f}'.format(phase, epochLoss))
-            
+        
+        if epoch % 5 == 0 : 
+            # Save model ..
+            state = {
+                'epoch' : epoch,
+                'stateDictEncoder' : encoderInit.state_dict(),
+                'stateDictDecoder' : decoderInit.state_dict(),
+                'stateDictColor' : colorInit.state_dict(),
+                'optimizerEncoder' : opEncoderInit.state_dict(),
+                'optimizerDecoder' : opDecoderInit.state_dict(),
+                'optimizerColor' : opColorInit.state_dict()
+            }
+            torch.save(state, 'Model%d.pth'%epoch)    
         print ('===============================\n\n')
