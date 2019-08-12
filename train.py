@@ -81,7 +81,7 @@ imInputMaskBatch = Variable(torch.FloatTensor(opt.batchSize, 1, opt.imageSize, o
 # initialize models
 encoderInit = nn.DataParallel(models.Encoder(), device_ids=opt.deviceIds)
 decoderInit = nn.DataParallel(models.Decoder(numVertices=642+1), device_ids=opt.deviceIds) # Center to be predicted too
-colorInit = nn.DataParallel(models.Color(numVertices=642), device_ids=opt.deviceIds)
+#colorInit = nn.DataParallel(models.Color(numVertices=642), device_ids=opt.deviceIds)
 
 ##############  ######################
 # Send things into GPU
@@ -91,7 +91,7 @@ if opt.cuda:
 
     encoderInit = encoderInit.cuda(opt.gpuId)
     decoderInit = decoderInit.cuda(opt.gpuId)
-    colorInit = colorInit.cuda(opt.gpuId)
+    #colorInit = colorInit.cuda(opt.gpuId)
 ####################################
 
 
@@ -100,7 +100,7 @@ if opt.cuda:
 scale = opt.scale
 opEncoderInit = optim.Adam(encoderInit.parameters(), lr=1e-3 * scale, betas=(0.5, 0.999) )
 opDecoderInit = optim.Adam(decoderInit.parameters(), lr=1e-3 * scale, betas=(0.5, 0.999) )
-opColorInit = optim.Adam(colorInit.parameters(), lr=1e-3 * scale, betas=(0.5, 0.999) )
+#opColorInit = optim.Adam(colorInit.parameters(), lr=1e-3 * scale, betas=(0.5, 0.999) )
 #####################################
 
 
@@ -142,11 +142,13 @@ with DebugHelper.GuruMeditation() as gr :
             if phase == 'train':
                 encoderInit.train(True)  # Set model to training mode
                 decoderInit.train(True)
-                colorInit.train(True)
+                outCols = torch.tensor([[1,0,0]]*642,dtype=torch.float32).repeat(opt.batchSize,1,1).cuda(opt.gpuId)
+                #colorInit.train(True)
             else:
                 encoderInit.train(False)  # Set model to evaluate mode
                 decoderInit.train(False)
-                colorInit.train(False)
+                outCols = torch.tensor([[1,0,0]]*642,dtype=torch.float32).repeat(opt.batchSize,1,1).cuda(opt.gpuId)
+                #colorInit.train(False)
 
             createMesh = True
             runningLoss = 0.0
@@ -171,7 +173,7 @@ with DebugHelper.GuruMeditation() as gr :
                 #imgMaskedInput = torch.cat([imgInput,imgInputMsk], dim=1)
                 features = encoderInit(imgInput)
                 outPos = decoderInit(features)
-                outCols = colorInit(features)
+                #outCols = colorInit(features)
                 #print (outPos.shape)
                 if createMesh :
                     templateVertex = dataBatch['TemplVertex'].cuda(opt.gpuId)
@@ -194,7 +196,7 @@ with DebugHelper.GuruMeditation() as gr :
                 # Train net..
                 opEncoderInit.zero_grad()
                 opDecoderInit.zero_grad()
-                opColorInit.zero_grad()
+                #opColorInit.zero_grad()
 
                 if jj % 10 == 0 and phase == 'train':
                     images = imagesPred.detach().cpu().numpy()
@@ -227,10 +229,10 @@ with DebugHelper.GuruMeditation() as gr :
                     loss.backward()
                     DebugHelper.PlotGradFlow(encoderInit.named_parameters(), os.path.join(opt.experiment,'tmp'), epoch, 'Encoder')
                     DebugHelper.PlotGradFlow(decoderInit.named_parameters(), os.path.join(opt.experiment,'tmp'), epoch, 'Encoder')
-                    DebugHelper.PlotGradFlow(colorInit.named_parameters(), os.path.join(opt.experiment,'tmp'), epoch, 'Encoder')
+                    #DebugHelper.PlotGradFlow(colorInit.named_parameters(), os.path.join(opt.experiment,'tmp'), epoch, 'Encoder')
                     opDecoderInit.step()
                     opEncoderInit.step()
-                    opColorInit.step()
+                    #opColorInit.step()
                 if phase == 'val' and (jj % 10 == 0): 
                     # Running val in batchsize 1..
                     meshM.forward(outPos[:,:-1,:], torch.zeros_like(outPos[:,-1:,:]).cuda(opt.gpuId), 1, 1, outCols)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_val_car.obj'), save_texture=False)
