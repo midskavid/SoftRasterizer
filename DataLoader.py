@@ -17,16 +17,20 @@ class BatchLoader(Dataset):
         self.batchSize = batchSize 
         self.numViews = numViews
         f = open(os.path.join(self.dataRoot,fyuseName),'r')
-        self.dataFyuseList = [ids.strip() for ids in f]
+        Data = json.load(f)
         f.close()
+        self.dataFyuseList = [ids.strip() for ids in Data['train_ids']]
         random.shuffle(self.dataFyuseList) # Permute..
-
-        # Now train eval split...
+        # Add val ids..
+        valids = [ids.strip() for ids in Data['val_ids']]
+        random.shuffle(valids)
+        self.dataFyuseList += valids 
+        
 
         self.dataViewMaskNames = {}
         self.dataProjectionMat = {}
         for idx in self.dataFyuseList :
-            self.dataViewMaskNames[idx] = glob.glob(os.path.join(self.dataRoot, 'Normalized/Depths/',idx,'depth*.png'))
+            self.dataViewMaskNames[idx] = glob.glob(os.path.join(self.dataRoot, 'train',idx,'*.png'))
             self.dataProjectionMat[idx] = self.ParsePoses(self.dataRoot, idx, self.dataViewMaskNames[idx], padding)
 
 
@@ -53,7 +57,7 @@ class BatchLoader(Dataset):
             raise
         # Load input image from JPEG images.. pad image accordingly : 
         frame = self.dataViewMaskNames[fyuseId][indexes[0]].split('/')[-1].replace('depth','').replace('0','',1)
-        imgInput = self.LoadImage(os.path.join(self.dataRoot, 'Fyuses', fyuseId,'unstabilized','stabilized_'+frame))
+        imgInput = self.LoadImage(self.dataViewMaskNames[fyuseId][indexes[0]].replace('png','jpg'))
         # read the corresponding mask...
         imgInputMsk = self.LoadMaskFromDepth(self.dataViewMaskNames[fyuseId][indexes[0]])
 
@@ -64,9 +68,8 @@ class BatchLoader(Dataset):
         colImgViews = []
 
         for ii in range(self.numViews): 
-            frameIndx = int(self.dataViewMaskNames[fyuseId][indexes[ii+1]].split('/')[-1].replace('depth','').replace('.png',''))
-            colFrame = self.dataViewMaskNames[fyuseId][indexes[ii+1]].split('/')[-1].replace('depth','').replace('0','',1)
-            colImgViews.append(self.LoadImage(os.path.join(self.dataRoot, 'Fyuses', fyuseId,'unstabilized','stabilized_'+colFrame), normalize=False))
+            frameIndx = int(self.dataViewMaskNames[fyuseId][indexes[ii+1]].split('/')[-1].replace('.png',''))
+            colImgViews.append(self.LoadImage(self.dataViewMaskNames[fyuseId][indexes[ii+1]].replace('png','jpg'), normalize=False))
             imgViews.append(self.LoadMaskFromDepth(self.dataViewMaskNames[fyuseId][indexes[ii+1]]))
             projViews.append(self.dataProjectionMat[fyuseId][frameIndx]['P'])
             distViews.append(self.dataProjectionMat[fyuseId][frameIndx]['distortion'])
@@ -97,10 +100,7 @@ class BatchLoader(Dataset):
             return im
 
         im = Image.open(imName)
-        imSq = Image.new('RGB', (960,960), (0,0,0)) ####Hardcoding
-        imSq.paste(im, (0,210)) ####Hardcoding
-        imSq = self.ImResize(imSq)
-        im = np.asarray(imSq, dtype=np.float32)
+        im = np.asarray(im, dtype=np.float32)
 
         #### Image being fed to the network has to be normalized but the different views should not be normalized...
         if normalize : 
@@ -120,28 +120,9 @@ class BatchLoader(Dataset):
             im = np.zeros([3, self.imSize, self.imSize], dtype=np.float32)
             return im
 
-        # im = Image.open(imName)
-        # imSq = Image.new('RGB', (1920,1920), (0,0,0)) ####Hardcoding
-        # imSq.paste(im, (0,420)) ####Hardcoding
-        # imSq = self.ImResize(imSq)
-        # im = np.asarray(imSq)
-        # im = img_as_float(im)
-        # im2 = np.zeros((self.imSize,self.imSize))
-        # im2[np.where(im < 1.)] = 0.
-
-        # PIL does not have a 16bit read.. therefore all this conversion between numpy and PIL
-        # TODO : easier way to use OpenCV
         try : 
             Im = imageio.imread(imName)
-            Im2 = np.ones((1080,1920))
-            Im1 = img_as_float(Im)
-            Im2[np.where(Im1 < 1.)] = 0.
-            Im2 = (255-255*Im2).astype(np.uint8)
-            im = Image.fromarray(Im2, 'L')
-            imSq = Image.new('L', (1920,1920), (0)) ####Hardcoding
-            imSq.paste(im, (0,420)) ####Hardcoding
-            imSq = imSq.resize((self.imSize, self.imSize), Image.ANTIALIAS)
-            im = np.asarray(imSq).astype('float32')/255.0
+            im = np.asarray(Im).astype('float32')/255.0
             im = im[np.newaxis]        
         except :
             print (imName)
@@ -157,12 +138,12 @@ class BatchLoader(Dataset):
 
     def ParsePoses(self, dataRoot, fyuseId, views, pad=420):
         # This is for the new format!!!
-        scenemodel_path = os.path.join(dataRoot, 'Normalized/ScenemodelFiles', fyuseId+'_scenemodel_raw.json')
+        scenemodel_path = os.path.join(dataRoot, 'train', fyuseId,'scenemodel_norm.json')
         assert os.path.exists(scenemodel_path), "Scenemodel {} not found!".format(scenemodel_path)
         with open(scenemodel_path, 'r') as f:
             poses = json.load(f)
         allPoses = {}
-        viewIds = set([int(view.split('/')[-1].replace('depth','').split('.')[0]) for view in views])
+        viewIds = set([int(view.split('/')[-1].split('.')[0]) for view in views])
         for frameNum, pose in enumerate(poses['trajectory']['measurements']):
             if frameNum not in viewIds:
                 continue

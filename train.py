@@ -19,10 +19,31 @@ import soft_renderer as sr
 from torch.autograd import Variable
 from torch.utils.tensorboard import SummaryWriter
 
+import pdb
+import traceback
+from torch import autograd
+class GuruMeditation (autograd.detect_anomaly):  
+    def __init__(self):
+        super(GuruMeditation, self).__init__()
+
+    def __enter__(self):
+        super(GuruMeditation, self).__enter__()
+        return self  
+
+    def __exit__(self, type, value, trace):
+        super(GuruMeditation, self).__exit__()
+        if isinstance(value, RuntimeError):
+            traceback.print_tb(trace)
+            Halt(str(value))
+
+def Halt(msg):
+    print (msg)
+    pdb.set_trace()
+
 
 parser = argparse.ArgumentParser()
 # The locationi of training set
-parser.add_argument('--dataRoot', default='/media/intelssd/akar/mesh_seg_dataset/', help='path to Dataset Root')
+parser.add_argument('--dataRoot', default='/media/intelssd/mridul/PositionMaps_improved_unstabilized/', help='path to Dataset Root')
 parser.add_argument('--experiment', default=None, help='the path to store samples and models')
 parser.add_argument('--fyuses', default='fyuse_ids.txt', help='the path to fyuseIds')
 parser.add_argument('--scale', type=float, default=1.0, help='learning rate scaling')
@@ -45,7 +66,7 @@ parser.add_argument('--lamF', type=float, default=0.0003, help='weight Flatten l
 
 opt = parser.parse_args()
 print(opt)
-# torch.backends.cudnn.enabled = False
+torch.backends.cudnn.enabled = False
 
 opt.gpuId = opt.deviceIds[0]
 
@@ -109,10 +130,10 @@ opDecoderInit = optim.Adam(decoderInit.parameters(), lr=1e-3 * scale, betas=(0.5
 fyuseDataset = DataLoader.BatchLoader(opt.dataRoot, opt.fyuses, opt.batchSize, imSize=opt.imageSize, numViews=opt.numViews, padding=opt.pad, debugDir=opt.experiment)
 datasetSize = len(fyuseDataset)
 indices = list(range(datasetSize))
-np.random.shuffle(indices)
-split = int(np.floor(opt.validationSplit * datasetSize))
+#shuffled before..
+split = 1345
 
-trainIndices, valIndices = indices[split:], indices[:split]
+trainIndices, valIndices = indices[:split], indices[split:] 
 
 # Creating PT data samplers and loaders:
 trainSampler = torch.utils.data.SubsetRandomSampler(trainIndices)
@@ -132,7 +153,7 @@ jj = 0
 writer = SummaryWriter(log_dir=opt.experiment)
 torch.set_printoptions(profile="full")
 
-with DebugHelper.GuruMeditation() as gr :
+with GuruMeditation() as gr :
     for epoch in range(opt.nepoch):
         print('Epoch {}/{}'.format(epoch, opt.nepoch - 1))
         print ('===============================')
