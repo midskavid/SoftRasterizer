@@ -72,35 +72,16 @@ if torch.cuda.is_available() and not opt.cuda:
     print("WARNING: You have a CUDA device, so you should probably run with --cuda")
 
 #################################
-# initialize tensors
-imInputBatch = Variable(torch.FloatTensor(opt.batchSize, 3, opt.imageSize, opt.imageSize))
-imInputMaskBatch = Variable(torch.FloatTensor(opt.batchSize, 1, opt.imageSize, opt.imageSize))
-# need a variable size placeholder to handle variable number of views per fyuse...
-
-
 # initialize models
-encoderInit = nn.DataParallel(models.Encoder(), device_ids=opt.deviceIds)
-decoderInit = nn.DataParallel(models.Decoder(numVertices=642+1), device_ids=opt.deviceIds) # Center to be predicted too
-colorInit = nn.DataParallel(models.Color(numVertices=642), device_ids=opt.deviceIds)
-
-##############  ######################
-# Send things into GPU
-if opt.cuda:
-    imInputBatch = imInputBatch.cuda(opt.gpuId)
-    imInputMaskBatch = imInputMaskBatch.cuda(opt.gpuId)
-
-    encoderInit = encoderInit.cuda(opt.gpuId)
-    decoderInit = decoderInit.cuda(opt.gpuId)
-    colorInit = colorInit.cuda(opt.gpuId)
-####################################
+ellipsoid = Ellipsoid.Ellipsoid(opt.meshPos)
+modelPix2Mesh = torch.nn.DataParallel(P2MModel(ellipsoid, opt.mesh_pos), device_ids=self.gpus).cuda(opt.gpuId)
 
 
 ####################################
 # Initial Optimizer
 scale = opt.scale
-opEncoderInit = optim.Adam(encoderInit.parameters(), lr=1e-3 * scale, betas=(0.5, 0.999) )
-opDecoderInit = optim.Adam(decoderInit.parameters(), lr=1e-3 * scale, betas=(0.5, 0.999) )
-opColorInit = optim.Adam(colorInit.parameters(), lr=1e-3 * scale, betas=(0.5, 0.999) )
+opModelPix2Mesh = optim.Adam(modelPix2Mesh.parameters(), lr=1e-3 * scale, betas=(0.5, 0.999))
+
 #####################################
 
 
@@ -125,12 +106,13 @@ dataLoaders = {"train": trainLoader, "val": validationLoader}
 dataLengths = {"train": len(trainLoader), "val": len(validationLoader)}
 ######################################
 
-pixelLoss = torch.nn.L1Loss()
 
-######################################
 jj = 0
 writer = SummaryWriter(log_dir=opt.experiment)
 torch.set_printoptions(profile="full")
+
+criterionP2M = losses.P2MLoss(ellipsoid).cuda()
+
 
 with DebugHelper.GuruMeditation() as gr :
     for epoch in range(opt.nepoch):
@@ -140,13 +122,9 @@ with DebugHelper.GuruMeditation() as gr :
         # Each epoch has a training and validation phase
         for phase in ['train', 'val'] : #['val', 'train'] ['train', 'val']
             if phase == 'train':
-                encoderInit.train(True)  # Set model to training mode
-                decoderInit.train(True)
-                colorInit.train(True)
+                modelPix2Mesh.train(True)  # Set model to training mode
             else:
-                encoderInit.train(False)  # Set model to evaluate mode
-                decoderInit.train(False)
-                colorInit.train(False)
+                modelPix2Mesh.train(False)  # Set model to evaluate mode
 
             createMesh = True
             runningLoss = 0.0
@@ -165,36 +143,34 @@ with DebugHelper.GuruMeditation() as gr :
                 imgInputMsk = dataBatch['ImgInputMsk'].cuda(opt.gpuId)
                 imgViews = dataBatch['ImgViews'].reshape(currBatchSize*opt.numViews,opt.imageSize,opt.imageSize).cuda(opt.gpuId)
                 projViews = dataBatch['ProjViews'].reshape(currBatchSize*opt.numViews,3,4).cuda(opt.gpuId)
-                distViews = dataBatch['DistViews'].reshape(currBatchSize*opt.numViews,5).cuda(opt.gpuId)
-                colImgViews = dataBatch['ColImgViews'].reshape(currBatchSize*opt.numViews,3,opt.imageSize,opt.imageSize).cuda(opt.gpuId)
+                distViews = dataBatch['DistViews'].reshape(currBatchSize*opt.numViews,5)
+                colImgViews = dataBatch['ColImgViews'].reshape(currBatchSize*opt.numViews,3,opt.imageSize,opt.imageSize)
 
                 #imgMaskedInput = torch.cat([imgInput,imgInputMsk], dim=1)
-                features = encoderInit(imgInput)
-                outPos = decoderInit(features)
-                outCols = colorInit(features)
-                #print (outPos.shape)
-                if createMesh :
-                    templateVertex = dataBatch['TemplVertex'].cuda(opt.gpuId)
-                    templateFaces =  dataBatch['TemplFaces'].cuda(opt.gpuId)
-                    meshM = models.MeshModel(templateFaces, templateVertex).cuda(opt.gpuId)
-                    createMesh = False
-                # TODO : calculate lap and flat loss here..
-                meshDeformed, lapLoss, fltLoss = meshM.forward(outPos[:,:-1,:], torch.zeros_like(outPos[:,-1:,:]).cuda(opt.gpuId), opt.numViews, currBatchSize, outCols)
+                out = modelPix2Mesh(imgInput)                
+                edgeLoss, lapLoss, moveLoss = criterionP2M(out)
+
+                # write a submodule to re-orient the mesh vertices to the rest state!!!!
                 renderer = sr.SoftRenderer(image_size=opt.imageSize, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projViews, orig_size=opt.origImageSize)
-                imagesPred = renderer.render_mesh(meshDeformed)
+                SS = 0.
+                for ijk in range(3) :
+                    meshOut = sr.Mesh(out[ijk].repeat(1, numViews, 1).reshape(numViews*numBatch, -1, 3), ellipsoid.faces[ijk].repeat(1, numViews, 1).reshape(numViews*numBatch, -1, 3))
+                    imagesPred = renderer.render_mesh(meshOut)
+                    SS += losses.SilhouetteLoss(imagesPred[:, 3,:,:], imgViews[:,0,:,:])
                 
-                SS = losses.SilhouetteLoss(imagesPred[:, 3], imgViews)
-                pixelL = pixelLoss(imagesPred[:,0:3,:,:]*(imgViews.unsqueeze(1)), (colImgViews/255.0)*(imgViews.unsqueeze(1)))
                 
                 loss = lamS*SS + \
                        lamL*lapLoss + \
-                       lamF*fltLoss +\
-                       lamP*pixelL
+                       lamM*moveLoss +\
+                       lamE*edgeLoss
                 
                 # Train net..
-                opEncoderInit.zero_grad()
-                opDecoderInit.zero_grad()
-                opColorInit.zero_grad()
+                opModelPix2Mesh.zero_grad()
+
+                if phase == 'train':                
+                    loss.backward()
+                    DebugHelper.PlotGradFlow(modelPix2Mesh.named_parameters(), os.path.join(opt.experiment,'tmp'), epoch, 'Encoder')
+                    opModelPix2Mesh.step()
 
                 if jj % 10 == 0 and phase == 'train':
                     images = imagesPred.detach().cpu().numpy()
@@ -223,19 +199,11 @@ with DebugHelper.GuruMeditation() as gr :
                     writer.add_image("Deformed and Ground Truth", globalImg+globalImgGt, global_step=jj, dataformats='HW')
                 writer.add_scalar(tag=phase, scalar_value=loss.item(), global_step=jj)
 
-                if phase == 'train':                
-                    loss.backward()
-                    DebugHelper.PlotGradFlow(encoderInit.named_parameters(), os.path.join(opt.experiment,'tmp'), epoch, 'Encoder')
-                    DebugHelper.PlotGradFlow(decoderInit.named_parameters(), os.path.join(opt.experiment,'tmp'), epoch, 'Encoder')
-                    DebugHelper.PlotGradFlow(colorInit.named_parameters(), os.path.join(opt.experiment,'tmp'), epoch, 'Encoder')
-                    opDecoderInit.step()
-                    opEncoderInit.step()
-                    opColorInit.step()
-                if phase == 'val' and (jj % 10 == 0): 
-                    # Running val in batchsize 1..
-                    meshM.forward(outPos[:,:-1,:], torch.zeros_like(outPos[:,-1:,:]).cuda(opt.gpuId), 1, 1, outCols)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_val_car.obj'), save_texture=False)
-                elif phase == 'train' and (jj % 10 == 0):
-                    meshM.forward(outPos[0,:-1,:], torch.zeros_like(outPos[0,-1:,:]).cuda(opt.gpuId), 1, 1, outCols)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_train_car.obj'), save_texture=False)
+                # if phase == 'val' and (jj % 10 == 0): 
+                #     # Running val in batchsize 1..
+                #     meshM.forward(outPos[:,:-1,:], torch.zeros_like(outPos[:,-1:,:]).cuda(opt.gpuId), 1, 1, outCols)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_val_car.obj'), save_texture=False)
+                # elif phase == 'train' and (jj % 10 == 0):
+                #     meshM.forward(outPos[0,:-1,:], torch.zeros_like(outPos[0,-1:,:]).cuda(opt.gpuId), 1, 1, outCols)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_train_car.obj'), save_texture=False)
                 runningLoss += loss
                 loop.set_description('Loss: %.4f'%(loss.item()))
                 #print (runningLoss/(ii+1.))
