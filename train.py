@@ -44,7 +44,7 @@ def Halt(msg):
 parser = argparse.ArgumentParser()
 # The locationi of training set
 parser.add_argument('--dataRoot', default='/media/intelssd/mridul/PositionMaps_improved_unstabilized/', help='path to Dataset Root')
-parser.add_argument('--experiment', default=None, help='the path to store samples and models')
+parser.add_argument('--experiment', default='/media/intelssd/mridul/CheckMeshGen', help='the path to store samples and models')
 parser.add_argument('--fyuses', default='fyuse_ids.txt', help='the path to fyuseIds')
 parser.add_argument('--scale', type=float, default=1.0, help='learning rate scaling')
 # The basic training setting
@@ -159,7 +159,7 @@ with GuruMeditation() as gr :
         print ('===============================')
 
         # Each epoch has a training and validation phase
-        for phase in ['train', 'val'] : #['val', 'train'] ['train', 'val']
+        for phase in ['train'] : #, 'val'] : #['val', 'train'] ['train', 'val']
             if phase == 'train':
                 encoderInit.train(True)  # Set model to training mode
                 decoderInit.train(True)
@@ -188,8 +188,8 @@ with GuruMeditation() as gr :
                 imgInputMsk = dataBatch['ImgInputMsk'].cuda(opt.gpuId)
                 imgViews = dataBatch['ImgViews'].reshape(currBatchSize*opt.numViews,opt.imageSize,opt.imageSize).cuda(opt.gpuId)
                 projViews = dataBatch['ProjViews'].reshape(currBatchSize*opt.numViews,3,4).cuda(opt.gpuId)
-                distViews = dataBatch['DistViews'].reshape(currBatchSize*opt.numViews,5).cuda(opt.gpuId)
-                colImgViews = dataBatch['ColImgViews'].reshape(currBatchSize*opt.numViews,3,opt.imageSize,opt.imageSize).cuda(opt.gpuId)
+                #distViews = dataBatch['DistViews'].reshape(currBatchSize*opt.numViews,5).cuda(opt.gpuId)
+                colImgViews = dataBatch['ColImgViews'].reshape(currBatchSize*opt.numViews,3,opt.imageSize,opt.imageSize)
 
                 #imgMaskedInput = torch.cat([imgInput,imgInputMsk], dim=1)
                 features = encoderInit(imgInput)
@@ -207,7 +207,7 @@ with GuruMeditation() as gr :
                 imagesPred = renderer.render_mesh(meshDeformed)
                 
                 SS = losses.SilhouetteLoss(imagesPred[:, 3], imgViews)
-                pixelL = pixelLoss(imagesPred[:,0:3,:,:]*(imgViews.unsqueeze(1)), (colImgViews/255.0)*(imgViews.unsqueeze(1)))
+                pixelL = 0#pixelLoss(imagesPred[:,0:3,:,:]*(imgViews.unsqueeze(1)), (colImgViews/255.0)*(imgViews.unsqueeze(1)))
                 
                 loss = lamS*SS + \
                        lamL*lapLoss + \
@@ -222,7 +222,7 @@ with GuruMeditation() as gr :
                 if jj % 10 == 0 and phase == 'train':
                     images = imagesPred.detach().cpu().numpy()
                     imagesGt = imgViews.detach().cpu().numpy() 
-                    colImagesGt = colImgViews.detach().cpu().numpy()
+                    colImagesGt = colImgViews.numpy()
 
                     numFrames = 20 # Save only 20 frames..
                     globalImg = 255 * np.ones((opt.imageSize*int(numFrames/5 + 1),opt.imageSize*5), dtype=np.uint8)
@@ -262,8 +262,6 @@ with GuruMeditation() as gr :
                 runningLoss += loss
                 loop.set_description('Loss: %.4f'%(loss.item()))
                 #print (runningLoss/(ii+1.))
-                jj += 1
-
             epochLoss = runningLoss / dataLengths[phase]
             print('{} Loss: {:.4f}'.format(phase, epochLoss))
         
@@ -273,10 +271,9 @@ with GuruMeditation() as gr :
                 'epoch' : epoch,
                 'stateDictEncoder' : encoderInit.state_dict(),
                 'stateDictDecoder' : decoderInit.state_dict(),
-                'stateDictColor' : colorInit.state_dict(),
                 'optimizerEncoder' : opEncoderInit.state_dict(),
                 'optimizerDecoder' : opDecoderInit.state_dict(),
-                'optimizerColor' : opColorInit.state_dict()
             }
-            torch.save(state, 'Model%d.pth'%epoch)    
+            torch.save(state, os.path.join(opt.experiment, 'Model%d.pth'%(epoch%6)))
+            print ('Model Saved!!!')   
         print ('===============================\n\n')

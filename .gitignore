@@ -110,5 +110,5 @@ data/datasets
 examples/unsupervised_recon
 examples/recon
 CheckMesh*/
-
+*.pth
 .DS_Store

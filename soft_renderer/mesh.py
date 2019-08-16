@@ -173,6 +173,10 @@ class Mesh(object):
         else:
             srf.save_obj(filename_obj, self.vertices[0], self.faces[0], textures=None)
 
+    def save_objs(self, filename_dir):
+        for idx in range(self.batch_size) :
+            srf.save_obj(os.path.joint(filename_obj,str(idx)+'.obj'), self.vertices[idx], self.faces[idx], textures=None)
+
     def voxelize(self, voxel_size=32):
         face_vertices_norm = self.face_vertices * voxel_size / (voxel_size - 1) + 0.5
         return srf.voxelization(face_vertices_norm, voxel_size, False)
