@@ -38,10 +38,9 @@ parser.add_argument('--cuda', action='store_true', help='enables cuda')
 parser.add_argument('--deviceIds', type=int, nargs='+', default=[0], help='the gpus used for training network')
 # The training weight
 parser.add_argument('--lamS', type=float, default=1.0, help='weight Silhouette')
-parser.add_argument('--lamC', type=float, default=1.0, help='weight Color')
 parser.add_argument('--lamL', type=float, default=0.3, help='weight Laplacian')
-parser.add_argument('--lamP', type=float, default=10.0, help='weight Pixel loss')
-parser.add_argument('--lamF', type=float, default=0.0003, help='weight Flatten loss')
+parser.add_argument('--lamM', type=float, default=10.0, help='weight move loss')
+parser.add_argument('--lamE', type=float, default=0.0003, help='weight Edge loss')
 
 opt = parser.parse_args()
 print(opt)
@@ -58,10 +57,9 @@ os.system('mkdir {0}/tmp'.format(opt.experiment))
 os.system('cp *.py %s' % opt.experiment )
 
 lamS = opt.lamS
-lamC = opt.lamC
 lamL = opt.lamL
-lamP = opt.lamP
-lamF = opt.lamF
+lamM = opt.lamM
+lamE = opt.lamE
 
 opt.seed = 0
 print("Random Seed: ", opt.seed)
@@ -145,12 +143,17 @@ with DebugHelper.GuruMeditation() as gr :
                 projViews = dataBatch['ProjViews'].reshape(currBatchSize*opt.numViews,3,4).cuda(opt.gpuId)
                 distViews = dataBatch['DistViews'].reshape(currBatchSize*opt.numViews,5)
                 colImgViews = dataBatch['ColImgViews'].reshape(currBatchSize*opt.numViews,3,opt.imageSize,opt.imageSize)
+                imgInputK = dataBatch['ImgInputK'].cuda()
+                imgInputRt = dataBatch['ImgInputRt'].cuda()
 
                 #imgMaskedInput = torch.cat([imgInput,imgInputMsk], dim=1)
-                out = modelPix2Mesh(imgInput)                
+                out = modelPix2Mesh(imgInput, imgInputK) # should take in camera intrinsics!!!!                
                 edgeLoss, lapLoss, moveLoss = criterionP2M(out)
 
                 # write a submodule to re-orient the mesh vertices to the rest state!!!!
+                for ijk in range(3):
+                    out[ijk] = torch.bmm(out[ijk], torch.inv(imgInputRt))
+
                 renderer = sr.SoftRenderer(image_size=opt.imageSize, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projViews, orig_size=opt.origImageSize)
                 SS = 0.
                 for ijk in range(3) :

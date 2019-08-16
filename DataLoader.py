@@ -75,6 +75,11 @@ class BatchLoader(Dataset):
         projViews = np.stack(projViews)
         distViews = np.stack(distViews)
         colImgViews = np.stack(colImgViews)
+        # Also return the extrinsic matrix of the view chosen as input...
+        # Also return the intrinsic matrix of the camera for the view chosen as input...
+        frameIndx = int(self.dataViewMaskNames[fyuseId][indexes[0]].split('/')[-1].replace('depth','').replace('.png',''))
+        imgInputK = self.dataProjectionMat[fyuseId][frameIndx]['K']
+        imgInputRt = self.dataProjectionMat[fyuseId][frameIndx]['Rt']
 
         batchDict = {'fyuseId': fyuseId, 
                      'ImgInput': imgInput,
@@ -83,8 +88,8 @@ class BatchLoader(Dataset):
                      'ProjViews': projViews,
                      'DistViews': distViews,
                      'ColImgViews': colImgViews,
-                     'TemplVertex': self.templateVertex,
-                     'TemplFaces': self.templateFaces
+                     'imgInputK' : imgInputK,
+                     'imgInputRt' : imgInputRt
                     }
 
         return batchDict
@@ -179,6 +184,8 @@ class BatchLoader(Dataset):
                 K = np.array(K)
                 Rt = np.linalg.inv(np.array(pose['anchor']['transform']).reshape(4, 4))
                 transforms['P'] = np.matmul(K, Rt[0:3,:]).astype('float32')
+                transforms['K'] = K
+                transforms['Rt'] = Rt
             except : 
                 transforms = {}
                 # k1, k2, p1, p2, k3
@@ -192,6 +199,8 @@ class BatchLoader(Dataset):
                 K = np.array(K)
                 Rt = np.linalg.inv(np.array(pose['anchor']['transform']).reshape(4, 4))
                 transforms['P'] = np.matmul(K, Rt[0:3,:]).astype('float32')
+                transforms['K'] = K
+                transforms['Rt'] = Rt
 
             allPoses[frameNum] = transforms
 

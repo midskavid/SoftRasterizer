@@ -121,14 +121,14 @@ class MeshModel(nn.Module):
 
 class P2MModel(nn.Module):
 
-    def __init__(self, options, ellipsoid, camera_f, camera_c, mesh_pos):
+    def __init__(self, ellipsoid, mesh_pos=[0.,0.,-0.8]):
         super(P2MModel, self).__init__()
 
-        self.hidden_dim = options.hidden_dim
-        self.coord_dim = options.coord_dim
-        self.last_hidden_dim = options.last_hidden_dim
+        self.hidden_dim = 192
+        self.coord_dim = 3
+        self.last_hidden_dim = 192
         self.init_pts = nn.Parameter(ellipsoid.coord, requires_grad=False)
-        self.gconv_activation = options.gconv_activation
+        self.gconv_activation = True
 
         self.nn_encoder, self.nn_decoder = get_backbone(options)
         self.features_dim = self.nn_encoder.features_dim + self.coord_dim
@@ -147,31 +147,26 @@ class P2MModel(nn.Module):
             GUnpooling(ellipsoid.unpool_idx[1])
         ])
 
-        # if options.align_with_tensorflow:
-        #     self.projection = GProjection
-        # else:
-        #     self.projection = GProjection
-        self.projection = GProjection(mesh_pos, camera_f, camera_c, bound=options.z_threshold,
-                                      tensorflow_compatible=options.align_with_tensorflow)
+        self.projection = GProjection(mesh_pos, bound=0)
 
         self.gconv = GConv(in_features=self.last_hidden_dim, out_features=self.coord_dim,
                            adj_mat=ellipsoid.adj_mat[2])
 
-    def forward(self, img):
+    def forward(self, img, camK):
         batch_size = img.size(0)
         img_feats = self.nn_encoder(img)
         img_shape = self.projection.image_feature_shape(img)
 
         init_pts = self.init_pts.data.unsqueeze(0).expand(batch_size, -1, -1)
         # GCN Block 1
-        x = self.projection(img_shape, img_feats, init_pts)
+        x = self.projection(img_shape, img_feats, init_pts, camK)
         x1, x_hidden = self.gcns[0](x)
 
         # before deformation 2
         x1_up = self.unpooling[0](x1)
 
         # GCN Block 2
-        x = self.projection(img_shape, img_feats, x1)
+        x = self.projection(img_shape, img_feats, x1, camK)
         x = self.unpooling[0](torch.cat([x, x_hidden], 2))
         # after deformation 2
         x2, x_hidden = self.gcns[1](x)
@@ -180,7 +175,7 @@ class P2MModel(nn.Module):
         x2_up = self.unpooling[1](x2)
 
         # GCN Block 3
-        x = self.projection(img_shape, img_feats, x2)
+        x = self.projection(img_shape, img_feats, x2, camK)
         x = self.unpooling[1](torch.cat([x, x_hidden], 2))
         x3, _ = self.gcns[2](x)
         if self.gconv_activation:
