@@ -201,8 +201,8 @@ class BatchLoader(Dataset):
                 K = np.array(K)
                 Rt = np.linalg.inv(np.array(pose['anchor']['transform']).reshape(4, 4))
                 transforms['P'] = np.matmul(K, Rt[0:3,:]).astype('float32')
-                transforms['K'] = K
-                transforms['Rt'] = Rt
+                transforms['K'] = K.astype('float32')
+                transforms['Rt'] = Rt.astype('float32')
 
             allPoses[frameNum] = transforms
 

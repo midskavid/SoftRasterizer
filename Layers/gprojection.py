@@ -45,8 +45,8 @@ class GProjection(nn.Module):
         positions = inputs + torch.tensor(self.mesh_pos, device=inputs.device, dtype=torch.float)
         proj = torch.bmm(positions, camK.transpose(2,1))
         
-        proj[:,:,0] /= proj[:,:,2]
-        proj[:,:,1] /= proj[:,:,2]
+        proj[:,:,0] /= proj[:,:,2] + 1e-5
+        proj[:,:,1] /= proj[:,:,2] + 1e-5
         w = proj[:,:,0]/half_resolution[0] - 1.
         h = proj[:,:,1]/half_resolution[0] - 1.
 
