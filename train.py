@@ -15,15 +15,20 @@ import torch.nn as nn
 import numpy as np
 import torch.optim as optim
 import soft_renderer as sr
-
+import Ellipsoid
 from torch.autograd import Variable
 from torch.utils.tensorboard import SummaryWriter
+
+
 
 
 parser = argparse.ArgumentParser()
 # The locationi of training set
 parser.add_argument('--dataRoot', default='/media/intelssd/akar/mesh_seg_dataset/', help='path to Dataset Root')
 parser.add_argument('--experiment', default=None, help='the path to store samples and models')
+parser.add_argument('--resNet', default='Pretrained/resnet50-19c8e357.pth', help='the path to ResNet50')
+parser.add_argument('--ellipsoid', default='Ellipsoid/info_ellipsoid.dat', help='the path to Ellipsoid')
+parser.add_argument('--meshPos', type=int, nargs='+', default=[0., 0., -0.8], help='mesh Pos')
 parser.add_argument('--fyuses', default='fyuse_ids.txt', help='the path to fyuseIds')
 parser.add_argument('--scale', type=float, default=1.0, help='learning rate scaling')
 # The basic training setting
@@ -38,13 +43,13 @@ parser.add_argument('--cuda', action='store_true', help='enables cuda')
 parser.add_argument('--deviceIds', type=int, nargs='+', default=[0], help='the gpus used for training network')
 # The training weight
 parser.add_argument('--lamS', type=float, default=1.0, help='weight Silhouette')
-parser.add_argument('--lamL', type=float, default=0.3, help='weight Laplacian')
-parser.add_argument('--lamM', type=float, default=10.0, help='weight move loss')
-parser.add_argument('--lamE', type=float, default=0.0003, help='weight Edge loss')
+parser.add_argument('--lamL', type=float, default=0.5, help='weight Laplacian')
+parser.add_argument('--lamM', type=float, default=0.033, help='weight move loss')
+parser.add_argument('--lamE', type=float, default=0.1, help='weight Edge loss')
 
 opt = parser.parse_args()
 print(opt)
-# torch.backends.cudnn.enabled = False
+torch.backends.cudnn.enabled = False
 
 opt.gpuId = opt.deviceIds[0]
 
@@ -71,8 +76,8 @@ if torch.cuda.is_available() and not opt.cuda:
 
 #################################
 # initialize models
-ellipsoid = Ellipsoid.Ellipsoid(opt.meshPos)
-modelPix2Mesh = torch.nn.DataParallel(P2MModel(ellipsoid, opt.mesh_pos), device_ids=self.gpus).cuda(opt.gpuId)
+ellipsoid = Ellipsoid.Ellipsoid(opt.meshPos, opt.ellipsoid)
+modelPix2Mesh = torch.nn.DataParallel(models.P2MModel(ellipsoid, opt.resNet, opt.meshPos), device_ids=opt.deviceIds).cuda(opt.gpuId)
 
 
 ####################################
@@ -110,7 +115,6 @@ writer = SummaryWriter(log_dir=opt.experiment)
 torch.set_printoptions(profile="full")
 
 criterionP2M = losses.P2MLoss(ellipsoid).cuda()
-
 
 with DebugHelper.GuruMeditation() as gr :
     for epoch in range(opt.nepoch):
@@ -150,16 +154,18 @@ with DebugHelper.GuruMeditation() as gr :
                 out = modelPix2Mesh(imgInput, imgInputK) # should take in camera intrinsics!!!!                
                 edgeLoss, lapLoss, moveLoss = criterionP2M(out)
 
+                outCoordinates = out["pred_coord"]
                 # write a submodule to re-orient the mesh vertices to the rest state!!!!
                 for ijk in range(3):
-                    out[ijk] = torch.bmm(out[ijk], torch.inv(imgInputRt))
+                    outCoordinates[ijk] = torch.cat([outCoordinates[ijk], torch.ones_like(outCoordinates[ijk][:, :, None, 0])], dim=-1)
+                    outCoordinates[ijk] = torch.bmm(outCoordinates[ijk], torch.inverse(imgInputRt).transpose(2,1)[:,:,0:3])
 
                 renderer = sr.SoftRenderer(image_size=opt.imageSize, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projViews, orig_size=opt.origImageSize)
                 SS = 0.
-                for ijk in range(3) :
-                    meshOut = sr.Mesh(out[ijk].repeat(1, numViews, 1).reshape(numViews*numBatch, -1, 3), ellipsoid.faces[ijk].repeat(1, numViews, 1).reshape(numViews*numBatch, -1, 3))
+                for ijk in range(3) : 
+                    meshOut = sr.Mesh(outCoordinates[ijk].repeat(1, opt.numViews, 1).reshape(opt.numViews*currBatchSize, -1, 3), ellipsoid.faces[ijk].repeat(opt.numViews*currBatchSize, 1, 1).type(torch.IntTensor).cuda(opt.gpuId))
                     imagesPred = renderer.render_mesh(meshOut)
-                    SS += losses.SilhouetteLoss(imagesPred[:, 3,:,:], imgViews[:,0,:,:])
+                    SS += losses.SilhouetteLoss(imagesPred[:, 3,:,:], imgViews)
                 
                 
                 loss = lamS*SS + \
@@ -202,11 +208,11 @@ with DebugHelper.GuruMeditation() as gr :
                     writer.add_image("Deformed and Ground Truth", globalImg+globalImgGt, global_step=jj, dataformats='HW')
                 writer.add_scalar(tag=phase, scalar_value=loss.item(), global_step=jj)
 
-                # if phase == 'val' and (jj % 10 == 0): 
-                #     # Running val in batchsize 1..
-                #     meshM.forward(outPos[:,:-1,:], torch.zeros_like(outPos[:,-1:,:]).cuda(opt.gpuId), 1, 1, outCols)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_val_car.obj'), save_texture=False)
-                # elif phase == 'train' and (jj % 10 == 0):
-                #     meshM.forward(outPos[0,:-1,:], torch.zeros_like(outPos[0,-1:,:]).cuda(opt.gpuId), 1, 1, outCols)[0].save_obj(os.path.join(opt.experiment, fyuseId[0]+'_train_car.obj'), save_texture=False)
+                if phase == 'val' and (jj % 10 == 0): 
+                    # Running val in batchsize 1..
+                    sr.Mesh(outCoordinates[ijk][0], ellipsoid.faces[ijk].type(torch.IntTensor).cuda(opt.gpuId)).save_obj(os.path.join(opt.experiment, fyuseId[0]+'_val_car.obj'), save_texture=False)
+                elif phase == 'train' and (jj % 10 == 0):
+                    sr.Mesh(outCoordinates[ijk][0], ellipsoid.faces[ijk].type(torch.IntTensor).cuda(opt.gpuId)).save_obj(os.path.join(opt.experiment, fyuseId[0]+'_train_car.obj'), save_texture=False)
                 runningLoss += loss
                 loop.set_description('Loss: %.4f'%(loss.item()))
                 #print (runningLoss/(ii+1.))

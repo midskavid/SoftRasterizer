@@ -110,6 +110,7 @@ data/datasets
 examples/unsupervised_recon
 examples/recon
 CheckMesh*/
+Pretrained/
 
 *.pth
 .DS_Store

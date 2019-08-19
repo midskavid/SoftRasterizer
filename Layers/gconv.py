@@ -3,7 +3,7 @@ import math
 import torch
 import torch.nn as nn
 
-from tensor import dot
+from Layers.tensor import dot
 
 
 class GConv(nn.Module):

@@ -1,6 +1,4 @@
 import torch
-import pdb
-import traceback
 import time
 import os
 import matplotlib
@@ -8,6 +6,8 @@ matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
+import pdb
+import traceback
 from torch import autograd
 
 

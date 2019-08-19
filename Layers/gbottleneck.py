@@ -1,7 +1,7 @@
 import torch.nn as nn
 import torch.nn.functional as F
 
-from models.layers.gconv import GConv
+from Layers.gconv import GConv
 
 
 class GResBlock(nn.Module):

@@ -2,8 +2,6 @@ import torch
 from torchvision.models import ResNet
 from torchvision.models.resnet import Bottleneck
 
-import config
-
 
 class P2MResNet(ResNet):
 
@@ -12,7 +10,7 @@ class P2MResNet(ResNet):
         super().__init__(*args, **kwargs)
 
     def _make_layer(self, block, planes, blocks, stride=1, dilate=False):
-        res = super()._make_layer(block, planes, blocks, stride=stride, dilate=dilate)
+        res = super()._make_layer(block, planes, blocks, stride=stride)
         self.output_dim += self.inplanes
         return res
 
@@ -39,8 +37,8 @@ class P2MResNet(ResNet):
         return self.output_dim
 
 
-def resnet50():
+def resnet50(path):
     model = P2MResNet(Bottleneck, [3, 4, 6, 3])
-    state_dict = torch.load(config.PRETRAINED_WEIGHTS_PATH["resnet50"])
+    state_dict = torch.load(path)
     model.load_state_dict(state_dict)
     return model

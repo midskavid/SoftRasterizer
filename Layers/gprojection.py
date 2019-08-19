@@ -36,14 +36,14 @@ class GProjection(nn.Module):
         return np.array([img.size(-1), img.size(-2)])
 
     def forward(self, resolution, img_features, inputs, camK):
-        half_resolution = (resolution - 1) / 2
-        camera_c_offset = np.array(self.camera_c) - half_resolution
+        half_resolution = torch.tensor((resolution - 1) / 2, device=inputs.device)
+        
         camK = camK*(256./1920.) # bring to pixel space...
         # map to [-1, 1]
         # not sure why they render to negative x
         positions = inputs + torch.tensor(self.mesh_pos, device=inputs.device, dtype=torch.float)
-        w = (-camK[:,0,0]*positions[:, :, 0] -camK[:,0,1]*positions[:, :, 1])/self.bound_val(positions[:, :, 2]) + camK[:,0,2]
-        h = camK[:,1,1]*(positions[:, :, 1] / self.bound_val(positions[:, :, 2])) + camK[:,1,2]
+        w = (-camK[:,0,0:1]*positions[:, :, 0] -camK[:,0,1:2]*positions[:, :, 1])/self.bound_val(positions[:, :, 2]) + camK[:,0,2:3] - half_resolution[0]
+        h = camK[:,1,1:2]*(positions[:, :, 1] / self.bound_val(positions[:, :, 2])) + camK[:,1,2:3] - half_resolution[1]
 
         w /= half_resolution[0]
         h /= half_resolution[1]

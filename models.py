@@ -121,7 +121,7 @@ class MeshModel(nn.Module):
 
 class P2MModel(nn.Module):
 
-    def __init__(self, ellipsoid, mesh_pos=[0.,0.,-0.8]):
+    def __init__(self, ellipsoid, pathResNet, mesh_pos=[0.,0.,-0.8]):
         super(P2MModel, self).__init__()
 
         self.hidden_dim = 192
@@ -130,7 +130,7 @@ class P2MModel(nn.Module):
         self.init_pts = nn.Parameter(ellipsoid.coord, requires_grad=False)
         self.gconv_activation = True
 
-        self.nn_encoder, self.nn_decoder = get_backbone(options)
+        self.nn_encoder, self.nn_decoder = get_backbone(pathResNet)
         self.features_dim = self.nn_encoder.features_dim + self.coord_dim
 
         self.gcns = nn.ModuleList([
