@@ -39,14 +39,17 @@ class GProjection(nn.Module):
         half_resolution = torch.tensor((resolution - 1) / 2, device=inputs.device)
         
         camK = camK*(256./1920.) # bring to pixel space...
+        camK[:,2,2] = 1.
         # map to [-1, 1]
         # not sure why they render to negative x
         positions = inputs + torch.tensor(self.mesh_pos, device=inputs.device, dtype=torch.float)
-        w = (-camK[:,0,0:1]*positions[:, :, 0] -camK[:,0,1:2]*positions[:, :, 1])/self.bound_val(positions[:, :, 2]) + camK[:,0,2:3] - half_resolution[0]
-        h = camK[:,1,1:2]*(positions[:, :, 1] / self.bound_val(positions[:, :, 2])) + camK[:,1,2:3] - half_resolution[1]
+        proj = torch.bmm(positions, camK.transpose(2,1))
+        
+        proj[:,:,0] /= proj[:,:,2]
+        proj[:,:,1] /= proj[:,:,2]
+        w = proj[:,:,0]/half_resolution[0] - 1.
+        h = proj[:,:,1]/half_resolution[0] - 1.
 
-        w /= half_resolution[0]
-        h /= half_resolution[1]
 
         # clamp to [-1, 1]
         w = torch.clamp(w, min=-1, max=1)

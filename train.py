@@ -19,7 +19,28 @@ import Ellipsoid
 from torch.autograd import Variable
 from torch.utils.tensorboard import SummaryWriter
 
+import pdb
+import traceback
+from torch import autograd
 
+
+class GuruMeditation (autograd.detect_anomaly):  
+    def __init__(self):
+        super(GuruMeditation, self).__init__()
+
+    def __enter__(self):
+        super(GuruMeditation, self).__enter__()
+        return self  
+
+    def __exit__(self, type, value, trace):
+        super(GuruMeditation, self).__exit__()
+        if isinstance(value, RuntimeError):
+            traceback.print_tb(trace)
+            Halt(str(value))
+
+def Halt(msg):
+    print (msg)
+    pdb.set_trace()
 
 
 parser = argparse.ArgumentParser()
@@ -27,8 +48,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--dataRoot', default='/media/intelssd/akar/mesh_seg_dataset/', help='path to Dataset Root')
 parser.add_argument('--experiment', default=None, help='the path to store samples and models')
 parser.add_argument('--resNet', default='Pretrained/resnet50-19c8e357.pth', help='the path to ResNet50')
-parser.add_argument('--ellipsoid', default='Ellipsoid/info_ellipsoid.dat', help='the path to Ellipsoid')
-parser.add_argument('--meshPos', type=int, nargs='+', default=[0., 0., -0.8], help='mesh Pos')
+parser.add_argument('--ellipsoid', default='Ellipsoid/info_ellipsoidN.dat', help='the path to Ellipsoid')
+parser.add_argument('--meshPos', type=int, nargs='+', default=[0., 0., 0], help='mesh Pos')
 parser.add_argument('--fyuses', default='fyuse_ids.txt', help='the path to fyuseIds')
 parser.add_argument('--scale', type=float, default=1.0, help='learning rate scaling')
 # The basic training setting
@@ -116,7 +137,7 @@ torch.set_printoptions(profile="full")
 
 criterionP2M = losses.P2MLoss(ellipsoid).cuda()
 
-with DebugHelper.GuruMeditation() as gr :
+with GuruMeditation() as gr :
     for epoch in range(opt.nepoch):
         print('Epoch {}/{}'.format(epoch, opt.nepoch - 1))
         print ('===============================')

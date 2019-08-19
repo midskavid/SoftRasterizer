@@ -6,28 +6,7 @@ matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
-import pdb
-import traceback
-from torch import autograd
 
-
-class GuruMeditation (autograd.detect_anomaly):  
-    def __init__(self):
-        super(GuruMeditation, self).__init__()
-
-    def __enter__(self):
-        super(GuruMeditation, self).__enter__()
-        return self  
-
-    def __exit__(self, type, value, trace):
-        super(GuruMeditation, self).__exit__()
-        if isinstance(value, RuntimeError):
-            traceback.print_tb(trace)
-            Halt(str(value))
-
-def Halt(msg):
-    print (msg)
-    pdb.set_trace()
 
 
 def PlotGradFlow(named_parameters, dir, epoch, prefix=''):
