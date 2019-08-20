@@ -63,6 +63,7 @@ class BatchLoader(Dataset):
         distViews = []
         colImgViews = []
 
+
         for ii in range(self.numViews): 
             frameIndx = int(self.dataViewMaskNames[fyuseId][indexes[ii+1]].split('/')[-1].replace('depth','').replace('.png',''))
             colFrame = self.dataViewMaskNames[fyuseId][indexes[ii+1]].split('/')[-1].replace('depth','').replace('0','',1)
@@ -75,11 +76,16 @@ class BatchLoader(Dataset):
         projViews = np.stack(projViews)
         distViews = np.stack(distViews)
         colImgViews = np.stack(colImgViews)
+        
         # Also return the extrinsic matrix of the view chosen as input...
         # Also return the intrinsic matrix of the camera for the view chosen as input...
         frameIndx = int(self.dataViewMaskNames[fyuseId][indexes[0]].split('/')[-1].replace('depth','').replace('.png',''))
         imgInputK = self.dataProjectionMat[fyuseId][frameIndx]['K']
         imgInputRt = self.dataProjectionMat[fyuseId][frameIndx]['Rt']
+
+        # Load semantic Mesh...
+        gtCoords = np.array(self.LoadSemanticMesh(os.path.join(self.dataRoot, 'SemanticMeshes',fyuseId+'_semantic_mesh.ply')), dtype='float32')
+
 
         batchDict = {'fyuseId': fyuseId, 
                      'ImgInput': imgInput,
@@ -91,7 +97,8 @@ class BatchLoader(Dataset):
                      'ImgInputK' : imgInputK,
                      'ImgInputRt' : imgInputRt,
                      'TemplVertex': self.templateVertex,
-                     'TemplFaces': self.templateFaces                     
+                     'TemplFaces': self.templateFaces,
+                     'GtCoords' : gtCoords                     
                     }
 
         return batchDict
@@ -229,6 +236,20 @@ class BatchLoader(Dataset):
         f.close()
         
         return vertices, faces
+    def LoadSemanticMesh(self, filename) :
+        vertices = []
+        f = open(filename, 'r')
+        for line in f :
+            if line.strip() == 'end_header' :
+                break
+            if 'vertex ' in line :
+                numVert = int(line.strip().split(' ')[-1])
+
+        for ii in range(numVert) :
+            line = f.readline().strip().split(' ')
+            vertices.append([float(line[0]), float(line[1]), float(line[2])])
+        f.close()
+        return vertices
 
     def SaveDebugBatch(self, dataDir):
         # TODO : implement this

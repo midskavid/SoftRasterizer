@@ -3,6 +3,7 @@ import torch
 import numpy as np
 import torch.nn as nn
 
+from Layers.chamfer_wrapper import ChamferDist
 
 def SilhouetteLoss(predict, target):
     dims = tuple(range(predict.ndimension())[1:])
@@ -126,6 +127,7 @@ class P2MLoss(nn.Module):
         super().__init__()
         self.l1_loss = nn.L1Loss(reduction='mean')
         self.l2_loss = nn.MSELoss(reduction='mean')
+        self.chamfer_dist = ChamferDist()
         self.laplace_idx = nn.ParameterList([
             nn.Parameter(idx, requires_grad=False) for idx in ellipsoid.laplace_idx])
         self.edges = nn.ParameterList([
@@ -184,24 +186,26 @@ class P2MLoss(nn.Module):
         rect_loss = F.binary_cross_entropy(pred_img, gt_img)
         return rect_loss
 
-    def forward(self, outputs):
+    def forward(self, outputs, gt_coord):
         """
         :param outputs: outputs from P2MModel
         :param targets: targets from input
         :return: loss, loss_summary (dict)
         """
 
-        edge_loss, lap_loss , move_loss= 0., 0., 0.
+        edge_loss, lap_loss , move_loss, chamfer_loss= 0., 0., 0., 0.
         lap_const = [0.2, 1., 1.]
 
         pred_coord, pred_coord_before_deform = outputs["pred_coord"], outputs["pred_coord_before_deform"]
         image_loss = 0.
 
         for i in range(3):
+            dist1, dist2, idx1, idx2 = self.chamfer_dist(gt_coord, pred_coord[i])
+            chamfer_loss += (torch.mean(dist1) + 0.55 * torch.mean(dist2))
+
             edge_loss += self.edge_regularization(pred_coord[i], self.edges[i])
-            lap, move = self.laplace_regularization(pred_coord_before_deform[i],
-                                                                   pred_coord[i], i)
+            lap, move = self.laplace_regularization(pred_coord_before_deform[i], pred_coord[i], i)
             lap_loss += lap_const[i] * lap
             move_loss += lap_const[i] * move
 
-        return edge_loss, lap_loss, move_loss
+        return edge_loss, lap_loss, move_loss, chamfer_loss

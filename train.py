@@ -69,6 +69,7 @@ parser.add_argument('--lamS', type=float, default=1.0, help='weight Silhouette')
 parser.add_argument('--lamL', type=float, default=0.5, help='weight Laplacian')
 parser.add_argument('--lamM', type=float, default=0.033, help='weight move loss')
 parser.add_argument('--lamE', type=float, default=0.1, help='weight Edge loss')
+parser.add_argument('--lamC', type=float, default=1., help='weight Chamfer Loss')
 
 opt = parser.parse_args()
 print(opt)
@@ -90,6 +91,7 @@ lamS = opt.lamS
 lamL = opt.lamL
 lamM = opt.lamM
 lamE = opt.lamE
+lamC = opt.lamC
 
 opt.seed = 0
 print("Random Seed: ", opt.seed)
@@ -176,17 +178,16 @@ with GuruMeditation() as gr :
 
                 fyuseId = dataBatch['fyuseId']
                 imgInput = dataBatch['ImgInput'].cuda(opt.gpuId)
-                imgInputMsk = dataBatch['ImgInputMsk'].cuda(opt.gpuId)
                 imgViews = dataBatch['ImgViews'].reshape(currBatchSize*opt.numViews,opt.imageSize,opt.imageSize).cuda(opt.gpuId)
                 projViews = dataBatch['ProjViews'].reshape(currBatchSize*opt.numViews,3,4).cuda(opt.gpuId)
-                distViews = dataBatch['DistViews'].reshape(currBatchSize*opt.numViews,5)
                 colImgViews = dataBatch['ColImgViews'].reshape(currBatchSize*opt.numViews,3,opt.imageSize,opt.imageSize)
                 imgInputK = dataBatch['ImgInputK'].cuda()
                 imgInputRt = dataBatch['ImgInputRt'].cuda()
-
+                gtCoords = dataBatch['GtCoords'].cuda()
+                
                 #imgMaskedInput = torch.cat([imgInput,imgInputMsk], dim=1)
                 out = modelPix2Mesh(imgInput, imgInputK) # should take in camera intrinsics!!!!                
-                edgeLoss, lapLoss, moveLoss = criterionP2M(out)
+                edgeLoss, lapLoss, moveLoss, chamLoss = criterionP2M(out, gtCoords)
 
                 outCoordinates = out["pred_coord"]
                 # write a submodule to re-orient the mesh vertices to the rest state!!!!
@@ -205,7 +206,8 @@ with GuruMeditation() as gr :
                 loss = lamS*SS + \
                        lamL*lapLoss + \
                        lamM*moveLoss +\
-                       lamE*edgeLoss
+                       lamE*edgeLoss +\
+                       lamC*chamLoss
                 
                 # Train net..
                 opModelPix2Mesh.zero_grad()
