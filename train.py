@@ -18,6 +18,7 @@ import soft_renderer as sr
 import Ellipsoid
 from torch.autograd import Variable
 from torch.utils.tensorboard import SummaryWriter
+import gc
 
 import pdb
 import traceback
@@ -79,8 +80,10 @@ if opt.experiment is None:
     opt.experiment = 'CheckMeshGen'
 os.system('mkdir {0}'.format(opt.experiment))
 #Clean Directory
-os.system('rm -r {0}/*'.format(opt.experiment))
+os.system('rm {0}/*'.format(opt.experiment))
 os.system('mkdir {0}/tmp'.format(opt.experiment))
+os.system('rm {0}/tmp/*'.format(opt.experiment))
+os.system('mkdir {0}/Models'.format(opt.experiment))
 os.system('cp *.py %s' % opt.experiment )
 
 lamS = opt.lamS
@@ -109,9 +112,9 @@ opModelPix2Mesh = optim.Adam(modelPix2Mesh.parameters(), lr=1e-3 * scale, betas=
 
 #####################################
 # Load Model
-if opt.load is not None : 
+if opt.loadPath is not None : 
     stateDict = torch.load(opt.loadPath) 
-    modelPix2Mesh.load_state_dict(stateDict['stateDictPix2Mesh'])
+    modelPix2Mesh.load_state_dict(stateDict['stateDictPix2Mesh'], strict=False)
     opModelPix2Mesh.load_state_dict(stateDict['optimizerPix2Mesh'])
 
 ####################################
@@ -153,7 +156,7 @@ with GuruMeditation() as gr :
         print ('===============================')
 
         # Each epoch has a training and validation phase
-        for phase in ['train', 'val'] : #['val', 'train'] ['train', 'val']
+        for phase in ['train']:#, 'val'] : #['val', 'train'] ['train', 'val']
             if phase == 'train':
                 modelPix2Mesh.train(True)  # Set model to training mode
             else:
@@ -259,6 +262,14 @@ with GuruMeditation() as gr :
                 'stateDictPix2Mesh' : modelPix2Mesh.state_dict(),
                 'optimizerPix2Mesh' : opModelPix2Mesh.state_dict(),
             }
-            torch.save(state, os.path.join(opt.experiment, 'Model%d.pth'%(epoch%6)))
+            for k, v in list(state['stateDictPix2Mesh'].items()):
+                if isinstance(v, torch.Tensor) and v.is_sparse:
+                    state['stateDictPix2Mesh'].pop(k)            
+            torch.save(state, os.path.join(opt.experiment,'Models', 'Model%d.pth'%(epoch%6)))
 
         print ('===============================\n\n')
+        try : 
+            del state, dataBatch, out
+        except :
+            pass
+        gc.collect()
