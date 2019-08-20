@@ -52,6 +52,7 @@ parser.add_argument('--ellipsoid', default='Ellipsoid/info_ellipsoidN.dat', help
 parser.add_argument('--meshPos', type=int, nargs='+', default=[0., 0., 0], help='mesh Pos')
 parser.add_argument('--fyuses', default='fyuse_ids.txt', help='the path to fyuseIds')
 parser.add_argument('--scale', type=float, default=1.0, help='learning rate scaling')
+parser.add_argument('--loadPath', default=None, help='the path for model')
 # The basic training setting
 parser.add_argument('--nepoch', type=int, default=200, help='the number of epochs for training')
 parser.add_argument('--batchSize', type=int, default=2, help='input batch size')
@@ -98,7 +99,7 @@ if torch.cuda.is_available() and not opt.cuda:
 #################################
 # initialize models
 ellipsoid = Ellipsoid.Ellipsoid(opt.meshPos, opt.ellipsoid)
-modelPix2Mesh = torch.nn.DataParallel(models.P2MModel(ellipsoid, opt.resNet, opt.meshPos), device_ids=opt.deviceIds).cuda(opt.gpuId)
+modelPix2Mesh = torch.nn.DataParallel(models.P2MModel(ellipsoid, opt.resNet, opt.meshPos), device_ids=opt.deviceIds)
 
 
 ####################################
@@ -107,7 +108,15 @@ scale = opt.scale
 opModelPix2Mesh = optim.Adam(modelPix2Mesh.parameters(), lr=1e-3 * scale, betas=(0.5, 0.999))
 
 #####################################
+# Load Model
+if opt.load is not None : 
+    stateDict = torch.load(opt.loadPath) 
+    modelPix2Mesh.load_state_dict(stateDict['stateDictPix2Mesh'])
+    opModelPix2Mesh.load_state_dict(stateDict['optimizerPix2Mesh'])
 
+####################################
+if opt.cuda :
+    modelPix2Mesh.cuda(opt.gpuId)
 
 ####################################
 # Data Loaders..
@@ -136,6 +145,7 @@ writer = SummaryWriter(log_dir=opt.experiment)
 torch.set_printoptions(profile="full")
 
 criterionP2M = losses.P2MLoss(ellipsoid).cuda()
+
 
 with GuruMeditation() as gr :
     for epoch in range(opt.nepoch):
@@ -241,5 +251,14 @@ with GuruMeditation() as gr :
 
             epochLoss = runningLoss / dataLengths[phase]
             print('{} Loss: {:.4f}'.format(phase, epochLoss))
-            
+
+        if epoch % 5 == 0 : 
+            # Save model ..
+            state = {
+                'epoch' : epoch,
+                'stateDictPix2Mesh' : modelPix2Mesh.state_dict(),
+                'optimizerPix2Mesh' : opModelPix2Mesh.state_dict(),
+            }
+            torch.save(state, os.path.join(opt.experiment, 'Model%d.pth'%(epoch%6)))
+
         print ('===============================\n\n')
