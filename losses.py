@@ -200,7 +200,7 @@ class P2MLoss(nn.Module):
         image_loss = 0.
 
         for i in range(3):
-            dist1, dist2, idx1, idx2 = self.chamfer_dist(gt_coord, pred_coord[i])
+            dist1, dist2, idx1, idx2 = self.chamfer_dist(gt_coord, outputs["rest_coord"][i])
             chamfer_loss += (torch.mean(dist1) + 0.55 * torch.mean(dist2))
 
             edge_loss += self.edge_regularization(pred_coord[i], self.edges[i])

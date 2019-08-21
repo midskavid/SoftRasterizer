@@ -185,20 +185,22 @@ with GuruMeditation() as gr :
                 imgInputRt = dataBatch['ImgInputRt'].cuda()
                 gtCoords = dataBatch['GtCoords'].cuda()
                 
-                #imgMaskedInput = torch.cat([imgInput,imgInputMsk], dim=1)
                 out = modelPix2Mesh(imgInput, imgInputK) # should take in camera intrinsics!!!!                
-                edgeLoss, lapLoss, moveLoss, chamLoss = criterionP2M(out, gtCoords)
 
-                outCoordinates = out["pred_coord"]
+                out["rest_coord"] = []
                 # write a submodule to re-orient the mesh vertices to the rest state!!!!
                 for ijk in range(3):
-                    outCoordinates[ijk] = torch.cat([outCoordinates[ijk], torch.ones_like(outCoordinates[ijk][:, :, None, 0])], dim=-1)
-                    outCoordinates[ijk] = torch.bmm(outCoordinates[ijk], torch.inverse(imgInputRt).transpose(2,1)[:,:,0:3])
+                    vert = torch.cat([out["pred_coord"][ijk], torch.ones_like(out["pred_coord"][ijk][:, :, None, 0])], dim=-1)
+                    out["rest_coord"].append(torch.bmm(vert, torch.inverse(imgInputRt).transpose(2,1)[:,:,0:3]))
+
+
+                edgeLoss, lapLoss, moveLoss, chamLoss = criterionP2M(out, gtCoords)
+
 
                 renderer = sr.SoftRenderer(image_size=opt.imageSize, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projViews, orig_size=opt.origImageSize)
                 SS = 0.
                 for ijk in range(3) : 
-                    meshOut = sr.Mesh(outCoordinates[ijk].repeat(1, opt.numViews, 1).reshape(opt.numViews*currBatchSize, -1, 3), ellipsoid.faces[ijk].repeat(opt.numViews*currBatchSize, 1, 1).type(torch.IntTensor).cuda(opt.gpuId))
+                    meshOut = sr.Mesh(out["rest_coord"][ijk].repeat(1, opt.numViews, 1).reshape(opt.numViews*currBatchSize, -1, 3), ellipsoid.faces[ijk].repeat(opt.numViews*currBatchSize, 1, 1).type(torch.IntTensor).cuda(opt.gpuId))
                     imagesPred = renderer.render_mesh(meshOut)
                     SS += losses.SilhouetteLoss(imagesPred[:, 3,:,:], imgViews)
                 
@@ -246,9 +248,9 @@ with GuruMeditation() as gr :
 
                 if phase == 'val' and (jj % 10 == 0): 
                     # Running val in batchsize 1..
-                    sr.Mesh(outCoordinates[ijk][0], ellipsoid.faces[ijk].type(torch.IntTensor).cuda(opt.gpuId)).save_obj(os.path.join(opt.experiment, fyuseId[0]+'_val_car.obj'), save_texture=False)
+                    sr.Mesh(out["rest_coord"][ijk][0], ellipsoid.faces[ijk].type(torch.IntTensor).cuda(opt.gpuId)).save_obj(os.path.join(opt.experiment, fyuseId[0]+'_val_car.obj'), save_texture=False)
                 elif phase == 'train' and (jj % 10 == 0):
-                    sr.Mesh(outCoordinates[ijk][0], ellipsoid.faces[ijk].type(torch.IntTensor).cuda(opt.gpuId)).save_obj(os.path.join(opt.experiment, fyuseId[0]+'_train_car.obj'), save_texture=False)
+                    sr.Mesh(out["rest_coord"][ijk][0], ellipsoid.faces[ijk].type(torch.IntTensor).cuda(opt.gpuId)).save_obj(os.path.join(opt.experiment, fyuseId[0]+'_train_car.obj'), save_texture=False)
                 runningLoss += loss
                 loop.set_description('Loss: %.4f'%(loss.item()))
                 #print (runningLoss/(ii+1.))
