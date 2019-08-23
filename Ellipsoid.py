@@ -57,7 +57,7 @@ class Ellipsoid(object):
         self.obj_fmt_faces = []
         # faces: f * 3, original ellipsoid, and two after deformations
         for i in range(1, 4):
-            face_file = os.path.join(ellipsoid_dir, "face%d.obj" % i)
+            face_file = os.path.join(ellipsoid_dir, "face%dCleaned.obj" % i)
             faces = np.loadtxt(face_file, dtype='|S32')
             self.obj_fmt_faces.append(faces)
             self.faces.append(torch.tensor(faces[:, 1:].astype(np.int) - 1))

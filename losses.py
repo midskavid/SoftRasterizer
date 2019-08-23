@@ -175,8 +175,13 @@ class P2MLoss(nn.Module):
 
         lap1 = self.laplace_coord(input1, self.laplace_idx[block_idx])
         lap2 = self.laplace_coord(input2, self.laplace_idx[block_idx])
-        laplace_loss = self.l2_loss(lap1, lap2) * lap1.size(-1)
-        move_loss = self.l2_loss(input1, input2) * input1.size(-1) if block_idx > 0 else 0
+        batch_size = lap1.shape[0]
+        dims = tuple(range(lap1.ndimension())[1:])
+
+        l2 = (lap2.pow(2).sum(dims)).sum() / batch_size
+        laplace_loss = self.l2_loss(lap1, lap2) * lap1.size(1) + l2
+        
+        move_loss = self.l2_loss(input1, input2) * input1.size(1) if block_idx > 0 else 0
         return laplace_loss, move_loss
 
 
@@ -192,7 +197,7 @@ class P2MLoss(nn.Module):
         """
 
         edge_loss, lap_loss , move_loss= 0., 0., 0.
-        lap_const = [0.2, 1., 1.]
+        lap_const = [1., 1., 1.]
 
         pred_coord, pred_coord_before_deform = outputs["pred_coord"], outputs["pred_coord_before_deform"]
         image_loss = 0.

@@ -67,8 +67,9 @@ parser.add_argument('--deviceIds', type=int, nargs='+', default=[0], help='the g
 # The training weight
 parser.add_argument('--lamS', type=float, default=1.0, help='weight Silhouette')
 parser.add_argument('--lamL', type=float, default=0.5, help='weight Laplacian')
-parser.add_argument('--lamM', type=float, default=0.033, help='weight move loss')
-parser.add_argument('--lamE', type=float, default=0.1, help='weight Edge loss')
+parser.add_argument('--lamM', type=float, default=0.0033, help='weight move loss')
+parser.add_argument('--lamE', type=float, default=2., help='weight Edge loss')
+parser.add_argument('--lamF', type=float, default=0.0003, help='Flatten loss')
 
 opt = parser.parse_args()
 print(opt)
@@ -90,6 +91,7 @@ lamS = opt.lamS
 lamL = opt.lamL
 lamM = opt.lamM
 lamE = opt.lamE
+lamF = opt.lamF
 
 opt.seed = 0
 print("Random Seed: ", opt.seed)
@@ -149,6 +151,9 @@ torch.set_printoptions(profile="full")
 
 criterionP2M = losses.P2MLoss(ellipsoid).cuda()
 
+criterionFlattenLoss1 = losses.FlattenLoss(ellipsoid.faces[0])
+criterionFlattenLoss2 = losses.FlattenLoss(ellipsoid.faces[1])
+criterionFlattenLoss3 = losses.FlattenLoss(ellipsoid.faces[2])
 
 with GuruMeditation() as gr :
     for epoch in range(opt.nepoch):
@@ -187,7 +192,8 @@ with GuruMeditation() as gr :
                 #imgMaskedInput = torch.cat([imgInput,imgInputMsk], dim=1)
                 out = modelPix2Mesh(imgInput, imgInputK) # should take in camera intrinsics!!!!                
                 edgeLoss, lapLoss, moveLoss = criterionP2M(out)
-
+                # calculate flatten loss...
+                flatLoss = criterionFlattenLoss1(out['pred_coord'][0]).mean() + criterionFlattenLoss2(out['pred_coord'][1]).mean() + criterionFlattenLoss3(out['pred_coord'][2]).mean()
                 outCoordinates = out["pred_coord"]
                 # write a submodule to re-orient the mesh vertices to the rest state!!!!
                 for ijk in range(3):
@@ -205,8 +211,8 @@ with GuruMeditation() as gr :
                 loss = lamS*SS + \
                        lamL*lapLoss + \
                        lamM*moveLoss +\
-                       lamE*edgeLoss
-                
+                       lamE*edgeLoss +\
+                       lamF*flatLoss
                 # Train net..
                 opModelPix2Mesh.zero_grad()
 
@@ -240,7 +246,12 @@ with GuruMeditation() as gr :
                     imageio.imsave(os.path.join(opt.experiment, fyuseId[0]+'_DeformCol_%05d.jpg'%ii), (255*globalColViews).astype(np.uint8).transpose(1,2,0))
                     # save to tensorboard!!
                     writer.add_image("Deformed and Ground Truth", globalImg+globalImgGt, global_step=jj, dataformats='HW')
-                writer.add_scalar(tag=phase, scalar_value=loss.item(), global_step=jj)
+                writer.add_scalar(tag=phase+'Total Loss', scalar_value=loss.item(), global_step=jj)
+                writer.add_scalar(tag=phase+'Silhouette Loss', scalar_value=SS.item(), global_step=jj)
+                writer.add_scalar(tag=phase+'Laplacian Loss', scalar_value=lapLoss.item(), global_step=jj)
+                writer.add_scalar(tag=phase+'Move Loss', scalar_value=moveLoss.item(), global_step=jj)
+                writer.add_scalar(tag=phase+'Edge Loss', scalar_value=edgeLoss.item(), global_step=jj)
+                writer.add_scalar(tag=phase+'Flat Loss', scalar_value=flatLoss.item(), global_step=jj)
 
                 if phase == 'val' and (jj % 10 == 0): 
                     # Running val in batchsize 1..
