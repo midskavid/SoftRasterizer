@@ -65,10 +65,10 @@ parser.add_argument('--pad', type=int, default=420, help='The amount of padding 
 parser.add_argument('--cuda', action='store_true', help='enables cuda')
 parser.add_argument('--deviceIds', type=int, nargs='+', default=[0], help='the gpus used for training network')
 # The training weight
-parser.add_argument('--lamS', type=float, default=1.0, help='weight Silhouette')
+parser.add_argument('--lamS', type=float, default=10.0, help='weight Silhouette')
 parser.add_argument('--lamL', type=float, default=0.5, help='weight Laplacian')
 parser.add_argument('--lamM', type=float, default=0.0033, help='weight move loss')
-parser.add_argument('--lamE', type=float, default=2., help='weight Edge loss')
+parser.add_argument('--lamE', type=float, default=0.1, help='weight Edge loss')
 parser.add_argument('--lamF', type=float, default=0.0003, help='Flatten loss')
 
 opt = parser.parse_args()
