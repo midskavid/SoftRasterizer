@@ -55,7 +55,7 @@ parser.add_argument('--fyuses', default='fyuse_ids.txt', help='the path to fyuse
 parser.add_argument('--scale', type=float, default=1.0, help='learning rate scaling')
 parser.add_argument('--loadPath', default=None, help='the path for model')
 # The basic training setting
-parser.add_argument('--nepoch', type=int, default=200, help='the number of epochs for training')
+parser.add_argument('--nepoch', type=int, default=10000, help='the number of epochs for training')
 parser.add_argument('--batchSize', type=int, default=2, help='input batch size')
 parser.add_argument('--numViews', type=int, default=15, help='views for training')
 parser.add_argument('--validationSplit', type=float, default=0.1, help='data used for validation')
@@ -151,9 +151,9 @@ torch.set_printoptions(profile="full")
 
 criterionP2M = losses.P2MLoss(ellipsoid).cuda()
 
-criterionFlattenLoss1 = losses.FlattenLoss(ellipsoid.faces[0])
-criterionFlattenLoss2 = losses.FlattenLoss(ellipsoid.faces[1])
-criterionFlattenLoss3 = losses.FlattenLoss(ellipsoid.faces[2])
+# criterionFlattenLoss1 = losses.FlattenLoss(ellipsoid.faces[0])
+# criterionFlattenLoss2 = losses.FlattenLoss(ellipsoid.faces[1])
+# criterionFlattenLoss3 = losses.FlattenLoss(ellipsoid.faces[2])
 
 with GuruMeditation() as gr :
     for epoch in range(opt.nepoch):
@@ -193,12 +193,19 @@ with GuruMeditation() as gr :
                 out = modelPix2Mesh(imgInput, imgInputK) # should take in camera intrinsics!!!!                
                 edgeLoss, lapLoss, moveLoss = criterionP2M(out)
                 # calculate flatten loss...
-                flatLoss = criterionFlattenLoss1(out['pred_coord'][0]).mean() + criterionFlattenLoss2(out['pred_coord'][1]).mean() + criterionFlattenLoss3(out['pred_coord'][2]).mean()
+                flatLoss = 0. #criterionFlattenLoss1(out['pred_coord'][0]).mean() + criterionFlattenLoss2(out['pred_coord'][1]).mean() + criterionFlattenLoss3(out['pred_coord'][2]).mean()
                 outCoordinates = out["pred_coord"]
+                outCoordinatesBefore = out["pred_coord_before_deform"]
                 # write a submodule to re-orient the mesh vertices to the rest state!!!!
                 for ijk in range(3):
                     outCoordinates[ijk] = torch.cat([outCoordinates[ijk], torch.ones_like(outCoordinates[ijk][:, :, None, 0])], dim=-1)
                     outCoordinates[ijk] = torch.bmm(outCoordinates[ijk], torch.inverse(imgInputRt).transpose(2,1)[:,:,0:3])
+
+
+                for ijk in range(3):
+                    outCoordinatesBefore[ijk] = torch.cat([outCoordinatesBefore[ijk], torch.ones_like(outCoordinatesBefore[ijk][:, :, None, 0])], dim=-1)
+                    outCoordinatesBefore[ijk] = torch.bmm(outCoordinatesBefore[ijk], torch.inverse(imgInputRt).transpose(2,1)[:,:,0:3])
+
 
                 renderer = sr.SoftRenderer(image_size=opt.imageSize, sigma_val=1e-4, aggr_func_rgb='hard', camera_mode='projection', P=projViews, orig_size=opt.origImageSize)
                 SS = 0.
@@ -251,13 +258,21 @@ with GuruMeditation() as gr :
                 writer.add_scalar(tag=phase+'Laplacian Loss', scalar_value=lapLoss.item(), global_step=jj)
                 writer.add_scalar(tag=phase+'Move Loss', scalar_value=moveLoss.item(), global_step=jj)
                 writer.add_scalar(tag=phase+'Edge Loss', scalar_value=edgeLoss.item(), global_step=jj)
-                writer.add_scalar(tag=phase+'Flat Loss', scalar_value=flatLoss.item(), global_step=jj)
+                #writer.add_scalar(tag=phase+'Flat Loss', scalar_value=flatLoss.item(), global_step=jj)
 
                 if phase == 'val' and (jj % 10 == 0): 
                     # Running val in batchsize 1..
                     sr.Mesh(outCoordinates[ijk][0], ellipsoid.faces[ijk].type(torch.IntTensor).cuda(opt.gpuId)).save_obj(os.path.join(opt.experiment, fyuseId[0]+'_val_car.obj'), save_texture=False)
                 elif phase == 'train' and (jj % 10 == 0):
-                    sr.Mesh(outCoordinates[ijk][0], ellipsoid.faces[ijk].type(torch.IntTensor).cuda(opt.gpuId)).save_obj(os.path.join(opt.experiment, fyuseId[0]+'_train_car.obj'), save_texture=False)
+                    sr.Mesh(outCoordinates[0][0], ellipsoid.faces[0].type(torch.IntTensor).cuda(opt.gpuId)).save_obj(os.path.join(opt.experiment, fyuseId[0]+'_train_car1.obj'), save_texture=False)
+                    sr.Mesh(outCoordinates[1][0], ellipsoid.faces[1].type(torch.IntTensor).cuda(opt.gpuId)).save_obj(os.path.join(opt.experiment, fyuseId[0]+'_train_car2.obj'), save_texture=False)
+                    sr.Mesh(outCoordinates[2][0], ellipsoid.faces[2].type(torch.IntTensor).cuda(opt.gpuId)).save_obj(os.path.join(opt.experiment, fyuseId[0]+'_train_car3.obj'), save_texture=False)
+
+                    sr.Mesh(outCoordinatesBefore[0][0], ellipsoid.faces[0].type(torch.IntTensor).cuda(opt.gpuId)).save_obj(os.path.join(opt.experiment, fyuseId[0]+'_train_car1before.obj'), save_texture=False)
+                    sr.Mesh(outCoordinatesBefore[1][0], ellipsoid.faces[1].type(torch.IntTensor).cuda(opt.gpuId)).save_obj(os.path.join(opt.experiment, fyuseId[0]+'_train_car2before.obj'), save_texture=False)
+                    sr.Mesh(outCoordinatesBefore[2][0], ellipsoid.faces[2].type(torch.IntTensor).cuda(opt.gpuId)).save_obj(os.path.join(opt.experiment, fyuseId[0]+'_train_car3before.obj'), save_texture=False)
+
+
                 runningLoss += loss
                 loop.set_description('Loss: %.4f'%(loss.item()))
                 #print (runningLoss/(ii+1.))
