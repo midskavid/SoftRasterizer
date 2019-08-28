@@ -45,12 +45,13 @@ parser = argparse.ArgumentParser()
 # The locationi of training set
 parser.add_argument('--dataRoot', default='/media/intelssd/mridul/PositionMaps_improved_unstabilized/', help='path to Dataset Root')
 parser.add_argument('--experiment', default='/media/intelssd/mridul/CheckMeshGen', help='the path to store samples and models')
-parser.add_argument('--fyuses', default='fyuse_ids.txt', help='the path to fyuseIds')
-parser.add_argument('--scale', type=float, default=1.0, help='learning rate scaling')
+parser.add_argument('--fyuses', default='data_split.json', help='the path to fyuseIds')
+parser.add_argument('--scale', type=float, default=0.1, help='learning rate scaling')
+parser.add_argument('--loadPath', default=None, help='the path for model')
 # The basic training setting
-parser.add_argument('--nepoch', type=int, default=200, help='the number of epochs for training')
-parser.add_argument('--batchSize', type=int, default=2, help='input batch size')
-parser.add_argument('--numViews', type=int, default=15, help='views for training')
+parser.add_argument('--nepoch', type=int, default=400, help='the number of epochs for training')
+parser.add_argument('--batchSize', type=int, default=4, help='input batch size')
+parser.add_argument('--numViews', type=int, default=10, help='views for training')
 parser.add_argument('--validationSplit', type=float, default=0.1, help='data used for validation')
 parser.add_argument('--imageSize', type=int, default=256, help='the height / width of the input image to network')
 parser.add_argument('--origImageSize', type=int, default=1920, help='the height / width of the actual image')
@@ -74,8 +75,10 @@ if opt.experiment is None:
     opt.experiment = 'CheckMeshGen'
 os.system('mkdir {0}'.format(opt.experiment))
 #Clean Directory
-os.system('rm -r {0}/*'.format(opt.experiment))
+os.system('rm {0}/*'.format(opt.experiment))
 os.system('mkdir {0}/tmp'.format(opt.experiment))
+os.system('rm {0}/tmp/*'.format(opt.experiment))
+os.system('mkdir {0}/Models'.format(opt.experiment))
 os.system('cp *.py %s' % opt.experiment )
 
 lamS = opt.lamS
@@ -92,28 +95,11 @@ torch.manual_seed(opt.seed)
 if torch.cuda.is_available() and not opt.cuda:
     print("WARNING: You have a CUDA device, so you should probably run with --cuda")
 
-#################################
-# initialize tensors
-imInputBatch = Variable(torch.FloatTensor(opt.batchSize, 3, opt.imageSize, opt.imageSize))
-imInputMaskBatch = Variable(torch.FloatTensor(opt.batchSize, 1, opt.imageSize, opt.imageSize))
-# need a variable size placeholder to handle variable number of views per fyuse...
-
-
+####################################
 # initialize models
 encoderInit = nn.DataParallel(models.Encoder(), device_ids=opt.deviceIds)
 decoderInit = nn.DataParallel(models.Decoder(numVertices=642+1), device_ids=opt.deviceIds) # Center to be predicted too
 #colorInit = nn.DataParallel(models.Color(numVertices=642), device_ids=opt.deviceIds)
-
-##############  ######################
-# Send things into GPU
-if opt.cuda:
-    imInputBatch = imInputBatch.cuda(opt.gpuId)
-    imInputMaskBatch = imInputMaskBatch.cuda(opt.gpuId)
-
-    encoderInit = encoderInit.cuda(opt.gpuId)
-    decoderInit = decoderInit.cuda(opt.gpuId)
-    #colorInit = colorInit.cuda(opt.gpuId)
-####################################
 
 
 ####################################
@@ -125,13 +111,32 @@ opDecoderInit = optim.Adam(decoderInit.parameters(), lr=1e-3 * scale, betas=(0.5
 #####################################
 
 
+#####################################
+# Load Model
+if opt.loadPath is not None : 
+    stateDict = torch.load(opt.loadPath) 
+    encoderInit.load_state_dict(stateDict['stateDictEncoder'])
+    opEncoderInit.load_state_dict(stateDict['optimizerEncoder'])
+
+    decoderInit.load_state_dict(stateDict['stateDictDecoder'])
+    opDecoderInit.load_state_dict(stateDict['optimizerDecoder'])
+
+##############  ######################
+# Send things into GPU
+if opt.cuda:
+    encoderInit = encoderInit.cuda(opt.gpuId)
+    decoderInit = decoderInit.cuda(opt.gpuId)
+    #colorInit = colorInit.cuda(opt.gpuId)
+####################################
+
+
 ####################################
 # Data Loaders..
 fyuseDataset = DataLoader.BatchLoader(opt.dataRoot, opt.fyuses, opt.batchSize, imSize=opt.imageSize, numViews=opt.numViews, padding=opt.pad, debugDir=opt.experiment)
 datasetSize = len(fyuseDataset)
 indices = list(range(datasetSize))
 #shuffled before..
-split = 1345
+split = int(datasetSize*(1.-opt.validationSplit))
 
 trainIndices, valIndices = indices[:split], indices[split:] 
 
@@ -159,7 +164,7 @@ with GuruMeditation() as gr :
         print ('===============================')
 
         # Each epoch has a training and validation phase
-        for phase in ['train'] : #, 'val'] : #['val', 'train'] ['train', 'val']
+        for phase in ['train', 'val'] : #['val', 'train'] ['train', 'val']
             if phase == 'train':
                 encoderInit.train(True)  # Set model to training mode
                 decoderInit.train(True)
@@ -224,7 +229,7 @@ with GuruMeditation() as gr :
                     imagesGt = imgViews.detach().cpu().numpy() 
                     colImagesGt = colImgViews.numpy()
 
-                    numFrames = 20 # Save only 20 frames..
+                    numFrames = opt.numViews # Save only 20 frames..
                     globalImg = 255 * np.ones((opt.imageSize*int(numFrames/5 + 1),opt.imageSize*5), dtype=np.uint8)
                     globalImgGt = np.zeros((opt.imageSize*int(numFrames/5 + 1),opt.imageSize*5), dtype=np.uint8)
                     globalColViews = np.zeros((3,opt.imageSize*int(numFrames/5 + 1),opt.imageSize*5), dtype=np.float32)
@@ -244,7 +249,10 @@ with GuruMeditation() as gr :
                     imageio.imsave(os.path.join(opt.experiment, fyuseId[0]+'_DeformCol_%05d.jpg'%ii), (255*globalColViews).astype(np.uint8).transpose(1,2,0))
                     # save to tensorboard!!
                     writer.add_image("Deformed and Ground Truth", globalImg+globalImgGt, global_step=jj, dataformats='HW')
-                writer.add_scalar(tag=phase, scalar_value=loss.item(), global_step=jj)
+                writer.add_scalar(tag=phase+'TotalLoss', scalar_value=loss.item(), global_step=jj)
+                writer.add_scalar(tag=phase+'SilhouetteLoss', scalar_value=SS.item(), global_step=jj)
+                writer.add_scalar(tag=phase+'Laplacian Loss', scalar_value=lapLoss.item(), global_step=jj)
+                writer.add_scalar(tag=phase+'Flatten Loss', scalar_value=fltLoss.item(), global_step=jj)
 
                 if phase == 'train':                
                     loss.backward()
@@ -264,6 +272,12 @@ with GuruMeditation() as gr :
                 #print (runningLoss/(ii+1.))
             epochLoss = runningLoss / dataLengths[phase]
             print('{} Loss: {:.4f}'.format(phase, epochLoss))
+
+            try : 
+                del outCols, dataBatch, meshM
+            except :
+                pass
+            gc.collect()        
         
         if epoch % 5 == 0 : 
             # Save model ..
@@ -274,6 +288,6 @@ with GuruMeditation() as gr :
                 'optimizerEncoder' : opEncoderInit.state_dict(),
                 'optimizerDecoder' : opDecoderInit.state_dict(),
             }
-            torch.save(state, os.path.join(opt.experiment, 'Model%d.pth'%(epoch%6)))
+            torch.save(state, os.path.join(opt.experiment, 'Models', 'Model%d.pth'%(epoch%6)))
             print ('Model Saved!!!')   
         print ('===============================\n\n')
