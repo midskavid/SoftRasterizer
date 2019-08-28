@@ -15,7 +15,7 @@ import torch.nn as nn
 import numpy as np
 import torch.optim as optim
 import soft_renderer as sr
-
+import gc
 from torch.autograd import Variable
 from torch.utils.tensorboard import SummaryWriter
 
